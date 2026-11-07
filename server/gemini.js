@@ -49,6 +49,9 @@ export function backendName() {
 
 // Если у проекта Vertex отключён биллинг (403), а в .env есть ключ AI Studio — дальше работаем через него.
 let vertexDisabled = false;
+// модель → момент, до которого у неё исчерпан дневной лимит бесплатного тарифа
+const exhausted = new Map();
+export const exhaustedModels = () => [...exhausted.entries()].filter(([, t]) => t > Date.now()).map(([m]) => m);
 
 async function endpoint(model) {
   if (config.credentialsFile && !(vertexDisabled && config.apiKey)) {
@@ -140,7 +143,12 @@ async function postModel(body, model) {
   const pool = [model, ...config.fallbackModels.filter((m) => m !== model)];
   let pick = 0;
   for (let attempt = 0; attempt < 12; attempt++) {
-    model = pool[pick % pool.length];
+    // модели с исчерпанным дневным лимитом пропускаем сразу
+    const alive = pool.filter((m) => !(exhausted.get(m) > Date.now()));
+    if (!alive.length) {
+      throw new Error(`Дневной лимит бесплатного тарифа исчерпан у всех моделей (${pool.join(', ')}). Подключите оплату к ключу AI Studio или дождитесь сброса лимита.`);
+    }
+    model = alive[pick % alive.length];
     let target;
     try {
       target = await endpoint(model);
@@ -178,12 +186,18 @@ async function postModel(body, model) {
       continue;
     }
     if (![0, 429, 500, 502, 503, 504].includes(res.status)) break;
+    const hint = Number((errText.match(/"retryDelay":\s*"(\d+(?:\.\d+)?)s"/) || [])[1] || 0) * 1000;
+    // Дневной лимит (или ожидание дольше минуты) — модель выбывает до сброса, сразу берём следующую.
+    if (res.status === 429 && (/per day/i.test(errText) || hint > 60_000)) {
+      exhausted.set(model, Date.now() + Math.max(hint, 60 * 60_000));
+      console.warn(`[gemini] ${model}: дневной лимит исчерпан — переключаюсь на следующую модель`);
+      continue;
+    }
     pick++;
     // все модели пула уже пробовали — пауза перед следующим кругом.
-    // Бесплатный тариф AI Studio сам говорит, сколько ждать («retryDelay»: «23s») — ждём не меньше.
+    // Бесплатный тариф AI Studio сам говорит, сколько ждать («retryDelay»: «23s») — ждём не меньше, но не дольше минуты.
     if (res.status !== 429 || pick % pool.length === 0) {
-      const hint = Number((errText.match(/"retryDelay":\s*"(\d+(?:\.\d+)?)s"/) || [])[1] || 0) * 1000;
-      await sleep(Math.max(backoff(attempt), hint ? hint + 500 + Math.random() * 1500 : 0));
+      await sleep(Math.max(backoff(attempt), hint ? Math.min(hint, 60_000) + 500 + Math.random() * 1500 : 0));
     }
   }
   throw lastError;
