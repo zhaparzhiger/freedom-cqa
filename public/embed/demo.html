@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Встраивание карточки CQA — пример</title>
+  <style>
+    body { margin: 0; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif; background: #f3f2f1; color: #201f1e; }
+    .bar { background: #2b2f3a; color: #fff; padding: 10px 20px; font-weight: 600; }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 20px; display: grid; grid-template-columns: 1fr 420px; gap: 20px; }
+    .form { background: #fff; border: 1px solid #e1dfdd; border-radius: 6px; padding: 18px; }
+    .form h1 { font-size: 20px; margin: 0 0 14px; }
+    .field { display: grid; grid-template-columns: 160px 1fr; gap: 8px; padding: 7px 0; border-bottom: 1px solid #f3f2f1; }
+    .field span:first-child { color: #605e5c; }
+    pre { background: #1e1e1e; color: #d4d4d4; padding: 14px; border-radius: 6px; overflow-x: auto; font-size: 13px; }
+    .note { color: #605e5c; font-size: 13px; }
+    select { font: inherit; padding: 4px 6px; }
+    @media (max-width: 900px) { .wrap { grid-template-columns: 1fr; } .field { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <div class="bar">Пример страницы CRM · обращение клиента</div>
+  <div class="wrap">
+    <section class="form">
+      <h1>Обращение в поддержку</h1>
+      <div class="field"><span>ID диалога</span><span><select id="pick">
+        <option>p1-ru-009</option><option>p1-ru-022</option><option>p1-ru-010</option><option>p1-kz-003</option><option>p1-en-005</option><option>p4-ru-001</option>
+      </select></span></div>
+      <div class="field"><span>Канал</span><span>Чат / звонок</span></div>
+      <div class="field"><span>Статус</span><span>Закрыто</span></div>
+      <h3>Как это подключено</h3>
+      <p class="note">Карточка справа — это веб-компонент. В HTML-веб-ресурс Dynamics 365 (или любую страницу) он вставляется одной строкой; стили изолированы и не ломают форму CRM:</p>
+      <pre>&lt;script type="module" src="https://&lt;сервер-cqa&gt;/embed/cqa-card.js"&gt;&lt;/script&gt;
+&lt;cqa-card conversation-id="p1-ru-009"&gt;&lt;/cqa-card&gt;</pre>
+      <p class="note">Смена атрибута <code>conversation-id</code> сразу перерисовывает карточку — так форма CRM подставляет ID текущей записи. Событие <code>cqa-loaded</code> отдаёт балл и флаг грубой ошибки скриптам формы.</p>
+      <p class="note" id="event-log"></p>
+    </section>
+    <aside>
+      <cqa-card id="card" conversation-id="p1-ru-009"></cqa-card>
+    </aside>
+  </div>
+  <script type="module" src="/embed/cqa-card.js"></script>
+  <script>
+    const card = document.getElementById('card');
+    document.getElementById('pick').addEventListener('change', (e) => card.setAttribute('conversation-id', e.target.value));
+    document.addEventListener('cqa-loaded', (e) => {
+      document.getElementById('event-log').textContent = `Событие cqa-loaded: ${e.detail.conversationId}, балл ${e.detail.total}, грубая ошибка: ${e.detail.grossError ? 'да' : 'нет'}`;
+    });
+  </script>
+</body>
+</html>

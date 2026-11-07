@@ -1,0 +1,21 @@
+{
+  "name": "freedom-cqa",
+  "version": "1.0.0",
+  "description": "Conversation Quality Analytics — оценка диалогов операторов по чек-листу с объяснениями, апелляцией и пересмотром",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "eval": "node scripts/eval.js",
+    "accuracy": "node scripts/accuracy.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@google/genai": "^2.32.0",
+    "ws": "^8.22.1"
+  }
+}

@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Тренажёр оператора — Freedom CQA</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231f8a4c'/%3E%3Cpath d='M9 22V10h13M9 16h9' stroke='white' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/css/app.css">
+  <link rel="stylesheet" href="/css/train.css">
+</head>
+<body>
+  <div class="cqa train">
+    <header class="topbar">
+      <span class="brand"><span class="brand-mark" aria-hidden="true">F</span><span class="brand-text">Freedom <b>Тренажёр</b></span></span>
+      <span class="muted tiny topbar-note" id="tr-sub"></span>
+    </header>
+    <main id="tr-view" class="view train-view"><div class="empty small"><span class="spinner"></span> Загружаю тренировку…</div></main>
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+  </div>
+  <script type="module" src="/js/train.js"></script>
+</body>
+</html>
