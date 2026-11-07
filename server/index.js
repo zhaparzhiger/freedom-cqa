@@ -550,6 +550,8 @@ route('POST', '/api/appeals/:id/decision', ({ params, body }) => {
 // ИИ-ассистент администратора
 route('POST', '/api/assistant', async ({ body }) => {
   const history = (Array.isArray(body.messages) ? body.messages : []).filter((m) => m && typeof m.text === 'string').map((m) => ({ role: m.role, text: m.text.slice(0, 2000) }));
+  // продолжение хода после действий браузера на сайте (click, type_text…)
+  if (body.resume && Array.isArray(body.resume.contents)) return assistantTurn(history, body.context || {}, body.resume);
   if (!history.length || history[history.length - 1].role !== 'user') throw bad('Нет вопроса');
   return assistantTurn(history, body.context || {});
 });

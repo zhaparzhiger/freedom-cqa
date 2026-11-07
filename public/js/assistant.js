@@ -3,6 +3,7 @@
 import { esc, toast, icon } from './ui.js';
 import { setListFilters } from './views/list.js';
 import { jump } from './views/card.js';
+import { act } from './agent-dom.js';
 
 const AVATAR_SRC = '/img/auditor.jpg';
 const ava = (cls = '') => `<img class="ai-img ${cls}" src="${AVATAR_SRC}" alt="" draggable="false">`;
@@ -142,11 +143,11 @@ const say = {
     line.innerHTML = words.map((w, i) => `<span style="animation-delay:${Math.round(i * step)}ms">${esc(w)}</span>`).join(' ');
     sayBox.appendChild(line);
   },
-  thinking() {
+  thinking(text = 'Смотрю данные…') {
     this.reset();
     sayBox.querySelector('.ai-sugg')?.remove();
     sayBox.querySelectorAll('.ai-line').forEach((old) => old.remove());
-    sayBox.insertAdjacentHTML('beforeend', '<div class="ai-line wait"><span class="spinner"></span> Смотрю данные…</div>');
+    sayBox.insertAdjacentHTML('beforeend', `<div class="ai-line wait"><span class="spinner"></span> ${esc(text)}</div>`);
   },
   reset() {
     clearTimeout(this.timer);
@@ -167,14 +168,26 @@ async function ask(q) {
   busyNow = true;
   say.thinking();
   history.push({ role: 'user', text: q });
-  try {
+  const post = async (extra = {}) => {
     const res = await fetch(`${apiBase()}/api/assistant`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ messages: history, context: { route: location.hash || '#/' } }),
+      body: JSON.stringify({ messages: history, context: { route: location.hash || '#/' }, ...extra }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || res.status);
+    return data;
+  };
+  try {
+    let data = await post();
+    // модель управляет сайтом: браузер выполняет её действия и возвращает результат, пока она не ответит текстом
+    while (data.pending) {
+      for (const a of data.actions || []) enqueue(a);
+      say.thinking('Работаю на сайте…');
+      const results = [];
+      for (const c of data.pending.calls) results.push(await perform(c.name, c.args));
+      data = await post({ resume: { ...data.pending, results } });
+    }
     history.push({ role: 'assistant', text: data.reply });
     say.text(data.reply);
     for (const a of data.actions) enqueue(a);
@@ -285,6 +298,7 @@ async function startVoice() {
       say.reset();
     } else if (m.t === 'tool') status.innerHTML = '<span class="spinner"></span> Смотрю данные…';
     else if (m.t === 'ui') enqueue({ name: m.name, args: m.args });
+    else if (m.t === 'ui_call') perform(m.name, m.args).then((result) => ws.readyState === 1 && ws.send(JSON.stringify({ t: 'ui_result', id: m.id, result })));
     else if (m.t === 'error') toast(m.error, 'error');
     else if (m.t === 'limit') toast('Время голосовой сессии вышло', 'info');
     else if (m.t === 'closed') stopVoice();
@@ -430,5 +444,28 @@ function enqueue(action) {
     .catch((e) => console.warn('[assistant action]', action.name, e));
 }
 
+// действие на сайте (click, type_text…): в общей очереди с показом, результат и новый снимок экрана — модели
+function perform(name, args = {}) {
+  const job = chain.then(async () => {
+    clearTimeout(hideTimer);
+    if (window.innerWidth < 720 && !panel.hidden) {
+      panel.hidden = true;
+      fab.hidden = false;
+    }
+    try {
+      return await act(name, args, pointTo);
+    } catch (e) {
+      return { error: String(e?.message || e) };
+    } finally {
+      hideTimer = setTimeout(() => {
+        $('.ai-pointer').hidden = true;
+        document.querySelectorAll('.ai-focus').forEach((x) => x.classList.remove('ai-focus'));
+      }, 2500);
+    }
+  });
+  chain = job.catch(() => {});
+  return job;
+}
+
 // те же действия на экране доступны другим модулям (и для проверки без модели)
-export { enqueue as showOnScreen, say as subtitles };
+export { enqueue as showOnScreen, say as subtitles, perform as controlSite };

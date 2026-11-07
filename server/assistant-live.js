@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import { GoogleGenAI, Modality, StartSensitivity } from '@google/genai';
 import { config } from './env.js';
-import { TOOLS, SYSTEM, dataTools, UI_TOOLS } from './assistant.js';
+import { TOOLS, SYSTEM, dataTools, UI_TOOLS, CLIENT_TOOLS } from './assistant.js';
 
 // названия Live-моделей у Vertex и у Google AI Studio разные
 const LIVE_MODEL = process.env.LIVE_MODEL || (config.credentialsFile ? 'gemini-live-2.5-flash-native-audio' : 'gemini-3.1-flash-live-preview');
@@ -28,6 +28,7 @@ const VOICE_RULES = `
 Говори живо и уверенно, как опытный руководитель контроля качества: 1–3 коротких предложения, без списков и markdown.
 Номера диалогов произноси коротко («восемнадцатый русский диалог»), id критериев вслух не называй — называй критерий словами.
 Пока говоришь о диалоге или ошибке — одновременно показывай это на экране инструментами point_at_rows, point_at_criterion, point_at_message, open_page.
+Когда просят что-то сделать на сайте — делай сам через read_screen и click/type_text/select_option, а вслух коротко комментируй («Открываю апелляции», «Ввожу поиск»). Подтверждение для действий с пометкой [нужно подтверждение] спрашивай голосом и жди «да».
 Если тебя перебили — остановись и ответь на новый вопрос.`;
 
 export async function handleAssistantLive(ws, initialRoute) {
@@ -56,10 +57,29 @@ export async function handleAssistantLive(ws, initialRoute) {
     finish();
   });
 
-  const onToolCall = (calls) => {
-    const functionResponses = calls.map((fc) => {
+  // действия на сайте выполняет браузер: ждём его ответ (результат и новый снимок экрана)
+  const waiting = new Map();
+  let seq = 0;
+  const askBrowser = (name, args) =>
+    new Promise((resolve) => {
+      const id = `u${++seq}`;
+      const t = setTimeout(() => {
+        waiting.delete(id);
+        resolve({ error: 'браузер не ответил вовремя' });
+      }, 60_000); // окно подтверждения в браузере может висеть, пока пользователь думает
+      waiting.set(id, (r) => {
+        clearTimeout(t);
+        resolve(r);
+      });
+      send({ t: 'ui_call', id, name, args });
+    });
+
+  const onToolCall = async (calls) => {
+    const functionResponses = await Promise.all(calls.map(async (fc) => {
       let response;
-      if (UI_TOOLS.has(fc.name)) {
+      if (CLIENT_TOOLS.has(fc.name)) {
+        response = await askBrowser(fc.name, fc.args || {});
+      } else if (UI_TOOLS.has(fc.name)) {
         send({ t: 'ui', name: fc.name, args: fc.args || {} });
         response = { result: 'показано на экране; продолжай говорить, не повторяй сказанное' };
       } else if (dataTools[fc.name]) {
@@ -71,7 +91,7 @@ export async function handleAssistantLive(ws, initialRoute) {
         }
       } else response = { error: 'нет такого инструмента' };
       return { id: fc.id, name: fc.name, response };
-    });
+    }));
     if (!closed) session.sendToolResponse({ functionResponses });
   };
 
@@ -101,7 +121,7 @@ export async function handleAssistantLive(ws, initialRoute) {
           if (sc?.outputTranscription?.text) send({ t: 'out', text: sc.outputTranscription.text });
           if (sc?.interrupted) send({ t: 'interrupted' });
           if (sc?.turnComplete) send({ t: 'turn' });
-          if (m.toolCall?.functionCalls?.length) onToolCall(m.toolCall.functionCalls);
+          if (m.toolCall?.functionCalls?.length) onToolCall(m.toolCall.functionCalls).catch((e) => console.error('[assistant live tool]', e?.message || e));
         },
         onerror: (e) => {
           console.error('[assistant live]', e?.message || e);
@@ -137,7 +157,11 @@ export async function handleAssistantLive(ws, initialRoute) {
       return;
     }
     if (msg.t === 'text' && msg.text) session.sendClientContent({ turns: [{ role: 'user', parts: [{ text: String(msg.text).slice(0, 2000) }] }], turnComplete: true });
-    else if (msg.t === 'route') route = String(msg.route || route);
+    else if (msg.t === 'ui_result' && waiting.has(msg.id)) {
+      const done = waiting.get(msg.id);
+      waiting.delete(msg.id);
+      done(msg.result && typeof msg.result === 'object' ? msg.result : { error: 'пустой ответ браузера' });
+    } else if (msg.t === 'route') route = String(msg.route || route);
     else if (msg.t === 'bye') finish();
   });
 }

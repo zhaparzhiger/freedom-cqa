@@ -152,6 +152,8 @@ export const dataTools = {
 
 // ── инструменты интерфейса (выполняет браузер) ──────────────────────
 export const UI_TOOLS = new Set(['open_page', 'open_conversation', 'point_at_criterion', 'point_at_message', 'point_at_rows']);
+// управление сайтом как пользователь: браузер выполняет действие и возвращает результат и новый снимок экрана
+export const CLIENT_TOOLS = new Set(['read_screen', 'click', 'type_text', 'select_option', 'set_checkbox', 'scroll_to', 'press_key']);
 
 const S = (properties, required = []) => ({ type: 'OBJECT', properties, required });
 export const TOOLS = [
@@ -194,6 +196,26 @@ export const TOOLS = [
     description: 'Открыть список диалогов и подсветить строки с указанными ID (например, диалоги лучшего оператора).',
     parameters: S({ conversation_ids: { type: 'ARRAY', items: { type: 'STRING' } }, caption: { type: 'STRING' } }, ['conversation_ids']),
   },
+  // ── управление любыми элементами сайта ──
+  {
+    name: 'read_screen',
+    description: 'Снимок текущего экрана: адрес, текст страницы и все кнопки, ссылки, поля, списки и флажки с ref (e1, e2…). Вызывай перед первым действием на экране.',
+    parameters: S({}),
+  },
+  {
+    name: 'click',
+    description: 'Нажать кнопку, ссылку, вкладку, переключатель или раскрыть блок по ref из последнего снимка. Для элементов с пометкой [нужно подтверждение] сначала спроси пользователя и после его «да» передай confirmed=true.',
+    parameters: S({ ref: { type: 'STRING' }, confirmed: { type: 'BOOLEAN' }, caption: { type: 'STRING' } }, ['ref']),
+  },
+  {
+    name: 'type_text',
+    description: 'Ввести текст в поле (поиск, комментарий, название, вес, group_id и т. п.). submit=true — сразу отправить (Enter). append=true — дописать к уже введённому.',
+    parameters: S({ ref: { type: 'STRING' }, text: { type: 'STRING' }, submit: { type: 'BOOLEAN' }, append: { type: 'BOOLEAN' } }, ['ref', 'text']),
+  },
+  { name: 'select_option', description: 'Выбрать вариант в выпадающем списке по его тексту.', parameters: S({ ref: { type: 'STRING' }, option: { type: 'STRING' } }, ['ref', 'option']) },
+  { name: 'set_checkbox', description: 'Отметить или снять флажок.', parameters: S({ ref: { type: 'STRING' }, checked: { type: 'BOOLEAN' } }, ['ref', 'checked']) },
+  { name: 'scroll_to', description: 'Прокрутить экран к элементу, чтобы пользователь его увидел.', parameters: S({ ref: { type: 'STRING' } }, ['ref']) },
+  { name: 'press_key', description: 'Нажать клавишу (Escape, Enter, ArrowRight…) — на элементе ref или на текущем фокусе.', parameters: S({ key: { type: 'STRING' }, ref: { type: 'STRING' } }, ['key']) },
 ];
 
 export const SYSTEM = `Ты — «Аудитор», ИИ-ассистент руководителя контроля качества на платформе Freedom CQA (оценка диалогов операторов поддержки по чек-листу).
@@ -207,18 +229,43 @@ export const SYSTEM = `Ты — «Аудитор», ИИ-ассистент ру
 - Учитывай все аспекты: средний балл, грубые ошибки, типичные слабые критерии, апелляции, число диалогов (по одному диалогу выводы делай осторожно).
 - Пол оператора неизвестен: не пиши и не говори «он/она», «сделал/сделала» — говори «оператор Саша», «оператор ответил».
 - Баллы — из 100 (например «45,5 из 100»), не проценты.
-- Баллы — из 100 (например «45,5 из 100»), не проценты.
-- В ответе: 2–6 предложений или короткий список. Названия критериев — по-человечески, id в скобках.`;
+- В ответе: 2–6 предложений или короткий список. Названия критериев — по-человечески, id в скобках.
+Управление сайтом — ты работаешь в интерфейсе сам, как пользователь с мышью и клавиатурой:
+- Если просят что-то сделать на сайте (нажать, включить, ввести, найти, отфильтровать, переключить роль, открыть вкладку, раскрыть критерий, подать апелляцию, поменять вес, запустить оценку…) — ДЕЛАЙ это сам, не объясняй, куда нажимать.
+- Порядок: read_screen → действие по ref (click, type_text, select_option, set_checkbox, scroll_to, press_key) → смотри новый снимок в ответе инструмента → следующее действие. ref из старых снимков не используй.
+- Нужного элемента нет — сначала перейди в нужный раздел (open_page, open_conversation или click по меню), потом read_screen.
+- Действия с пометкой [нужно подтверждение] меняют данные или тратят вызовы модели (удалить, сохранить, применить, оценить, решение по апелляции, подать апелляцию). Сначала коротко скажи, что именно нажмёшь, и спроси «Подтверждаете?». Только после явного «да» вызывай click с confirmed=true. Если браузер показал своё окно подтверждения — пользователь отвечает в нём сам.
+- Выбрать файл с диска может только пользователь — попроси его.
+- После действий коротко скажи, что сделано и что теперь на экране.`;
 
-/** Один ход диалога с ассистентом: модель ходит в инструменты, пока не даст текстовый ответ. */
-export async function assistantTurn(history, context) {
-  const contents = history.slice(-12).map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.text }] }));
-  if (context?.route) contents[contents.length - 1].parts.unshift({ text: `(Служебное: сейчас на экране ${context.route})` });
+const MAX_STEPS = 24;
+
+/**
+ * Один ход диалога с ассистентом: модель ходит в инструменты, пока не даст текстовый ответ.
+ * Инструменты управления сайтом выполняет браузер: тогда ход прерывается и возвращается { pending },
+ * браузер делает действия и присылает resume = { contents, step, done, results } — ход продолжается.
+ */
+export async function assistantTurn(history, context, resume) {
+  let contents;
+  let startStep = 0;
+  if (resume?.contents) {
+    contents = resume.contents;
+    startStep = Number(resume.step) || 0;
+    // ответы на вызовы прошлого шага: посчитанные сервером + выполненные браузером, в исходном порядке
+    const results = resume.results || [];
+    const parts = (resume.done || []).map((d) =>
+      d.client ? { functionResponse: { name: d.name, response: results.shift() || { error: 'браузер не выполнил действие' } } } : { functionResponse: { name: d.name, response: d.response } },
+    );
+    contents.push({ role: 'user', parts });
+  } else {
+    contents = history.slice(-12).map((m) => ({ role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.text }] }));
+    if (context?.route) contents[contents.length - 1].parts.unshift({ text: `(Служебное: сейчас на экране ${context.route})` });
+  }
   const actions = [];
   const trace = [];
-  for (let step = 0; step < 10; step++) {
+  for (let step = startStep; step < MAX_STEPS; step++) {
     // последний шаг — без инструментов: модель обязана ответить текстом по уже собранным данным
-    const last = step === 9;
+    const last = step === MAX_STEPS - 1;
     const { json } = await generateRaw({
       systemInstruction: { role: 'system', parts: [{ text: SYSTEM }] },
       contents,
@@ -233,6 +280,23 @@ export async function assistantTurn(history, context) {
       return { reply: text || 'Готово.', actions, trace };
     }
     contents.push({ role: 'model', parts });
+    if (calls.some((fc) => CLIENT_TOOLS.has(fc.name))) {
+      const done = calls.map((fc) => {
+        trace.push(fc.name);
+        if (CLIENT_TOOLS.has(fc.name)) return { name: fc.name, client: true };
+        if (UI_TOOLS.has(fc.name)) {
+          actions.push({ name: fc.name, args: fc.args || {} });
+          return { name: fc.name, response: { result: 'показано на экране' } };
+        }
+        try {
+          return { name: fc.name, response: dataTools[fc.name] ? { result: dataTools[fc.name](fc.args || {}) } : { error: 'нет такого инструмента' } };
+        } catch (e) {
+          return { name: fc.name, response: { error: e.message } };
+        }
+      });
+      const clientCalls = calls.filter((fc) => CLIENT_TOOLS.has(fc.name)).map((fc) => ({ name: fc.name, args: fc.args || {} }));
+      return { pending: { contents, step: step + 1, done, calls: clientCalls }, actions, trace };
+    }
     const responses = calls.map((fc) => {
       let response;
       if (UI_TOOLS.has(fc.name)) {
