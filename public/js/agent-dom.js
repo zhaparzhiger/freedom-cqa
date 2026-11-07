@@ -19,6 +19,26 @@ const INTERACTIVE = [
   '[contenteditable="true"]',
 ].join(',');
 
+// смысловые блоки страницы (карточки показателей, секции, графики, таблицы) — их Аудитор выделяет, когда объясняет страницу
+const BLOCKS = [
+  '#view header.head',
+  '#view .lane-l',
+  '#view .lane-r',
+  '#view .toolbar',
+  '#view .ops-col',
+  '#view section.sheet',
+  '#view div.sheet',
+  '#view .sheet-h.sub',
+  '#view .d-zones',
+  '#view table',
+  '#view .count-line',
+  '#view .msgs',
+  '#view .score',
+  '#view [id^="crit-"]',
+  '#view [data-explain]',
+].join(',');
+const HEADING = 'h1, h2, h3, .sheet-h b, .cap, b, strong';
+
 // действия, которые меняют данные или тратят вызовы модели: без явного «да» пользователя не нажимаем
 // (открыть форму — можно; отправить, сохранить, удалить, оценить — только после «да»)
 const DANGER = /удал|delete|примен|сохран|оцени|принять|принят|отклон|подать|отправ|импорт|загрузить|активир|создать|решени|пересч|запуст|сброс/i;
@@ -62,6 +82,14 @@ function roleOf(el) {
 
 let refs = new Map();
 
+// подпись блока: его заголовок и начало текста
+function blockLabel(el) {
+  if (el.tagName === 'TABLE') return clean('таблица: ' + [...el.querySelectorAll('th')].map((t) => t.innerText).join(', '), 120);
+  const h = clean(el.querySelector(HEADING)?.innerText, 60);
+  const all = clean(el.innerText, 140);
+  return h && !all.startsWith(h) ? clean(h + ' — ' + all, 140) : all;
+}
+
 /** Снимок текущего экрана: адрес, заголовок, кратко текст страницы и все элементы, с которыми можно работать. */
 const isDanger = (el, label) => ['button', 'tab', 'option'].includes(roleOf(el)) && DANGER.test(label);
 
@@ -92,13 +120,25 @@ export function snapshot({ textLimit = 1800, max = 220 } = {}) {
     if (r.bottom < 0 || r.top > innerHeight) s += ' [за экраном]';
     lines.push(s);
   }
+  const blocks = [];
+  let b = 0;
+  for (const el of document.querySelectorAll(BLOCKS)) {
+    if (blocks.length >= 45) break;
+    if (!visible(el) || el.getBoundingClientRect().height < 24 || el.closest('ul.cards li')) continue;
+    const ref = `b${++b}`;
+    el.setAttribute('data-ai-ref', ref);
+    refs.set(ref, el);
+    const r = el.getBoundingClientRect();
+    blocks.push(`${ref} «${blockLabel(el)}»${r.bottom < 0 || r.top > innerHeight ? ' [за экраном]' : ''}`);
+  }
   const view = document.getElementById('view');
   return {
     route: location.hash || '#/',
     title: clean(document.querySelector('#view h1, #view h2')?.innerText, 120),
     text: clean(view?.innerText, textLimit),
     elements: lines.join('\n'),
-    note: 'ref действуют до следующего снимка. Элементы «за экраном» можно нажимать сразу — прокрутка не нужна.',
+    blocks: blocks.join('\n'),
+    note: 'ref действуют до следующего снимка. Элементы «за экраном» можно нажимать сразу — прокрутка не нужна. Блоки (b…) и элементы (e…) выделяй через highlight или tour, когда объясняешь страницу.',
   };
 }
 
@@ -141,6 +181,10 @@ export async function act(name, args = {}, pointTo) {
     return { error: `элемент ${args.ref} не найден — экран изменился. Вот новый снимок, возьми ref из него.`, screen: snapshot() };
   }
   if (name === 'read_screen') return { screen: snapshot() };
+  if (name === 'highlight') {
+    if (pointTo) await pointTo(el, args.caption || '');
+    return { ok: `выделено «${clean(el.matches(BLOCKS) ? blockLabel(el) : labelOf(el), 60)}»` };
+  }
   const label = el ? labelOf(el) : '';
   if (name === 'click' && isDanger(el, label) && args.confirmed !== true) {
     return { needs_confirmation: true, label, message: `«${label}» меняет данные или тратит вызовы модели. Спроси пользователя и после «да» повтори click с confirmed=true.` };

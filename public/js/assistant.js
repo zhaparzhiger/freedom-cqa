@@ -51,6 +51,7 @@ const status = $('#ai-status');
 const big = $('#ai-big');
 
 fab.addEventListener('click', () => {
+  if (present.on) return present.end(true);
   panel.hidden = false;
   fab.hidden = true;
 });
@@ -81,9 +82,11 @@ function split(sentence) {
   const out = [];
   let s = sentence.trim();
   while (s.length > MAX_CHUNK) {
-    let cut = s.lastIndexOf(', ', MAX_CHUNK);
-    if (cut < MAX_CHUNK * 0.4) cut = s.lastIndexOf(' ', MAX_CHUNK);
-    if (cut <= 0) cut = MAX_CHUNK;
+    // чуть длиннее блока — режем пополам, чтобы в конце не остался обрывок из одного слова
+    const lim = s.length < MAX_CHUNK * 1.6 ? Math.ceil(s.length / 2) + 12 : MAX_CHUNK;
+    let cut = s.lastIndexOf(', ', lim);
+    if (cut < lim * 0.4) cut = s.lastIndexOf(' ', lim);
+    if (cut <= 0) cut = lim;
     out.push(s.slice(0, cut + 1).trim());
     s = s.slice(cut + 1).trim();
   }
@@ -142,12 +145,15 @@ const say = {
     line.className = `ai-line ${cls}`;
     line.innerHTML = words.map((w, i) => `<span style="animation-delay:${Math.round(i * step)}ms">${esc(w)}</span>`).join(' ');
     sayBox.appendChild(line);
+    // во время показа окно свёрнуто — та же фраза идёт подписью у аватара на странице
+    if (present.on) caption(line.innerHTML);
   },
   thinking(text = 'Смотрю данные…') {
     this.reset();
     sayBox.querySelector('.ai-sugg')?.remove();
     sayBox.querySelectorAll('.ai-line').forEach((old) => old.remove());
     sayBox.insertAdjacentHTML('beforeend', `<div class="ai-line wait"><span class="spinner"></span> ${esc(text)}</div>`);
+    if (present.on) caption(`<span class="spinner"></span> ${esc(text)}`);
   },
   reset() {
     clearTimeout(this.timer);
@@ -346,9 +352,58 @@ const goto = async (hash, readySelector) => {
   return waitFor(readySelector);
 };
 
-async function pointTo(el, caption) {
+// подпись у аватара: во время показа — текущая фраза Аудитора, иначе — что он делает
+function caption(html) {
+  const c = $('.ai-pointer .ai-caption');
+  c.innerHTML = html;
+  c.hidden = !html;
+}
+
+// режим показа: окно свёрнуто, аватар ходит по странице и подсвечивает то, о чём говорит.
+// Когда речь и действия закончились — указатель исчезает, окно возвращается.
+let jobs = 0;
+const present = {
+  on: false,
+  reopen: false,
+  timer: 0,
+  start() {
+    clearTimeout(this.timer);
+    if (this.on) return;
+    this.on = true;
+    this.reopen = !panel.hidden;
+    caption(''); // подпись от прошлого показа не должна мелькнуть
+    panel.hidden = true;
+    fab.hidden = false;
+    root.classList.add('presenting');
+  },
+  idle(delay = 3000) {
+    clearTimeout(this.timer);
+    if (!this.on) return;
+    this.timer = setTimeout(() => {
+      const talking = say.queue.length || Date.now() < say.until || voice.sources.size;
+      if (jobs || talking || busyNow) return this.idle(1000);
+      this.end();
+    }, delay);
+  },
+  end(open = this.reopen) {
+    clearTimeout(this.timer);
+    if (!this.on) return;
+    this.on = false;
+    root.classList.remove('presenting');
+    $('.ai-pointer').hidden = true;
+    document.querySelectorAll('.ai-focus').forEach((x) => x.classList.remove('ai-focus'));
+    if (open) {
+      panel.hidden = false;
+      fab.hidden = true;
+    }
+  },
+};
+
+async function pointTo(el, text) {
   if (!el) return;
-  el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  // высокий блок целиком не влезет — показываем его начало
+  const tall = el.getBoundingClientRect().height > window.innerHeight * 0.6;
+  el.scrollIntoView({ behavior: 'smooth', block: tall ? 'start' : 'center' });
   // ждём, пока плавная прокрутка остановится, иначе координаты устаревшие
   let last = -1;
   for (let i = 0; i < 15; i++) {
@@ -360,11 +415,12 @@ async function pointTo(el, caption) {
   const p = $('.ai-pointer');
   const r = el.getBoundingClientRect();
   p.hidden = false;
-  p.querySelector('.ai-caption').textContent = caption || '';
-  p.querySelector('.ai-caption').hidden = !caption;
+  // своя подпись действия; без неё остаётся текущая фраза Аудитора
+  if (text) caption(esc(text));
+  else if (!present.on) caption('');
   // аватар — над левой частью элемента, подпись справа от него
-  const x = Math.min(window.innerWidth - 320, Math.max(8, r.left + Math.min(r.width * 0.25, 160)));
-  const y = Math.min(window.innerHeight - 70, Math.max(90, r.top - 58));
+  const x = Math.max(8, Math.min(window.innerWidth - 400, r.left + Math.min(r.width * 0.25, 160)));
+  const y = Math.min(window.innerHeight - 120, Math.max(90, (tall ? Math.max(r.top, 70) : r.top) - 58));
   p.style.transform = `translate(${x}px, ${y}px)`;
   document.querySelectorAll('.ai-focus').forEach((x) => x.classList.remove('ai-focus'));
   await sleep(500);
@@ -419,52 +475,63 @@ async function run(a) {
 
 // действия выполняются по одному, даже если голосовая модель присылает их пачкой
 let chain = Promise.resolve();
-let hideTimer = 0;
 const recent = new Map(); // ключ действия → время: голосовая модель иногда повторяет ту же подсветку
+
+// любое действие на экране: окно сворачивается, после последнего действия и конца речи — возвращается
+function schedule(fn, visible = true) {
+  jobs++;
+  const job = chain.then(async () => {
+    if (visible) present.start(); // снимок экрана ничего не показывает — окно не трогаем
+    try {
+      return await fn();
+    } finally {
+      jobs--;
+      present.idle();
+    }
+  });
+  chain = job.catch(() => {});
+  return job;
+}
+
 function enqueue(action) {
   const g = action.args || {};
   const key = [action.name, g.page, g.conversation_id, g.criterion_id, g.index, (g.conversation_ids || []).join(',')].join('|');
   if (Date.now() - (recent.get(key) || 0) < 15000) return;
   recent.set(key, Date.now());
-  chain = chain
-    .then(async () => {
-      clearTimeout(hideTimer);
-      // на узком экране панель закрывает интерфейс — сворачиваем её, пока ассистент показывает
-      if (window.innerWidth < 720 && !panel.hidden) {
-        panel.hidden = true;
-        fab.hidden = false;
-      }
-      await run(action);
-      await sleep(1600);
-      hideTimer = setTimeout(() => {
-        $('.ai-pointer').hidden = true;
-        document.querySelectorAll('.ai-focus').forEach((x) => x.classList.remove('ai-focus'));
-      }, 4000);
-    })
-    .catch((e) => console.warn('[assistant action]', action.name, e));
+  schedule(async () => {
+    await run(action);
+    await sleep(1200);
+  }).catch((e) => console.warn('[assistant action]', action.name, e));
 }
 
-// действие на сайте (click, type_text…): в общей очереди с показом, результат и новый снимок экрана — модели
+// экскурсия по странице: аватар переходит от блока к блоку, подсвечивает его и рассказывает субтитрами
+async function tour(steps = []) {
+  const shown = [];
+  for (const s of steps.slice(0, 10)) {
+    const r = await act('highlight', { ref: s.ref }, pointTo);
+    if (r.error) continue;
+    shown.push(s.ref);
+    say.reset();
+    say.feed(plain(String(s.text || '')) + ' ');
+    say.flush();
+    await sleep(400);
+    while (say.queue.length || Date.now() < say.until) await sleep(120);
+  }
+  return shown.length
+    ? { ok: `показано шагов: ${shown.length} (${shown.join(', ')}). Пользователь уже прочитал эти пояснения — в ответе их не повторяй, закончи одной короткой фразой.` }
+    : { error: 'ни один ref не найден — экран изменился. Вызови read_screen и повтори.' };
+}
+
+// действие на сайте (click, type_text, highlight, tour…): в общей очереди с показом, результат — модели
 function perform(name, args = {}) {
-  const job = chain.then(async () => {
-    clearTimeout(hideTimer);
-    if (window.innerWidth < 720 && !panel.hidden) {
-      panel.hidden = true;
-      fab.hidden = false;
-    }
+  return schedule(async () => {
     try {
+      if (name === 'tour') return await tour(args.steps);
       return await act(name, args, pointTo);
     } catch (e) {
       return { error: String(e?.message || e) };
-    } finally {
-      hideTimer = setTimeout(() => {
-        $('.ai-pointer').hidden = true;
-        document.querySelectorAll('.ai-focus').forEach((x) => x.classList.remove('ai-focus'));
-      }, 2500);
     }
-  });
-  chain = job.catch(() => {});
-  return job;
+  }, name !== 'read_screen');
 }
 
 // те же действия на экране доступны другим модулям (и для проверки без модели)

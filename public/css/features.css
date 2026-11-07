@@ -284,6 +284,14 @@ button.hbar:hover { background: var(--paper-2); }
 .ai-pointer { position: fixed; left: 0; top: 0; z-index: 47; pointer-events: none; transition: transform .7s var(--ease); display: flex; align-items: flex-start; gap: 8px; }
 .ai-pointer .ai-img { width: 52px; height: 52px; box-shadow: 0 0 0 3px var(--forest), 0 0 0 5px var(--lime), 0 6px 18px rgba(0, 0, 0, .3); }
 .ai-caption { margin-top: 8px; max-width: 260px; background: var(--forest); color: #fff; font-size: 13px; padding: 7px 11px; border-radius: 10px; box-shadow: 0 10px 24px -12px rgba(0, 0, 0, .5); }
+.ai-caption[hidden] { display: none; }
+/* режим показа: подпись у аватара — это субтитры того, что Аудитор сейчас говорит */
+.ai.presenting .ai-caption { max-width: min(340px, calc(100vw - 84px)); font-size: 15px; line-height: 1.45; padding: 10px 14px; border-radius: 14px; }
+.ai-caption > span:not(.spinner) { display: inline-block; opacity: 0; transform: translateY(6px); filter: blur(3px); animation: aiword .45s var(--ease) forwards; }
+.ai-caption .spinner { width: 12px; height: 12px; vertical-align: -1px; }
+.ai.presenting .ai-pointer .ai-face { animation: aifloat 2.4s ease-in-out infinite; }
+@keyframes aifloat { 50% { transform: translateY(-4px); } }
+@media (prefers-reduced-motion: reduce) { .ai-caption > span { animation: none; opacity: 1; transform: none; filter: none; } .ai.presenting .ai-pointer .ai-face { animation: none; } }
 .ai-focus { box-shadow: 0 0 0 3px var(--lime), 0 0 0 9px rgba(211, 238, 106, .3) !important; animation: aipulse 1.4s ease-in-out 3; }
 @keyframes aipulse { 50% { box-shadow: 0 0 0 3px var(--lime), 0 0 0 14px rgba(211, 238, 106, .12) !important; } }
 .ai-panel :focus-visible { outline-color: var(--green-ink); }

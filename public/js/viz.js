@@ -402,6 +402,7 @@ export function bgGrid() {
     const c = cv.getContext('2d');
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.clearRect(0, 0, cv.width, cv.height);
+    if (!base?.width || !base.height) return; // окно ещё без размера (скрытая вкладка, перезагрузка)
     c.drawImage(base, 0, 0);
     if (k < 0.01) return;
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
