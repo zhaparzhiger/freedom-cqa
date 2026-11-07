@@ -7,13 +7,8 @@ import { jump } from './views/card.js';
 const AVATAR_SRC = '/img/auditor.jpg';
 const ava = (cls = '') => `<img class="ai-img ${cls}" src="${AVATAR_SRC}" alt="" draggable="false">`;
 
-const SUGGEST = [
-  'Кто лучший оператор и почему?',
-  'Кто худший оператор? Покажи его главную ошибку',
-  'Где операторы ошибаются чаще всего?',
-  'Покажи диалоги с грубыми ошибками',
-  'Сравни качество на русском, казахском и английском',
-];
+// подсказки помещаются в блок субтитров без прокрутки — поэтому их три
+const SUGGEST = ['Где операторы ошибаются чаще всего?', 'Покажи диалоги с грубыми ошибками', 'Сравни качество на русском, казахском и английском'];
 
 const apiBase = () => (window.CQA_CONFIG?.apiBase || '').replace(/\/$/, '');
 const history = [];
@@ -35,7 +30,7 @@ root.innerHTML = `
       <div class="ai-status" id="ai-status">Поговорите со мной голосом — я покажу всё на экране</div>
       <button class="btn lime ai-call" type="button" id="ai-call">${icon('mic')}Поговорить голосом</button>
     </div>
-    <div class="ai-msgs" id="ai-msgs">
+    <div class="ai-say" id="ai-say" aria-live="polite">
       <div class="ai-sugg">${SUGGEST.map((s) => `<button type="button" class="ai-chip">${esc(s)}</button>`).join('')}</div>
     </div>
     <form class="ai-input" id="ai-form">
@@ -49,7 +44,7 @@ document.body.appendChild(root);
 const $ = (s) => root.querySelector(s);
 const panel = $('.ai-panel');
 const fab = $('.ai-fab');
-const msgs = $('#ai-msgs');
+const sayBox = $('#ai-say');
 const stage = $('.ai-stage');
 const status = $('#ai-status');
 const big = $('#ai-big');
@@ -70,37 +65,107 @@ $('#ai-form').addEventListener('submit', (e) => {
   input.value = '';
   if (!q) return;
   if (voice.ws?.readyState === 1) {
-    bubble('me', q);
+    say.reset();
     voice.ws.send(JSON.stringify({ t: 'text', text: q }));
   } else ask(q);
 });
 
-// лёгкий markdown: **жирный**, `код`, списки
-const format = (t) =>
-  esc(t)
-    .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>')
-    .replace(/`([^`]+)`/g, '<code>$1</code>')
-    .replace(/^\s*[-•*]\s+/gm, '• ')
-    .replace(/\n/g, '<br>');
+// ── субтитры: одна фраза на месте, следующая сменяет предыдущую ─────
+// Ни истории переписки, ни расшифровки слов пользователя: видно только то, что Аудитор говорит сейчас.
+const MAX_CHUNK = 130; // столько символов помещается в блок без прокрутки
+const plain = (t) => t.replace(/\*\*|`/g, '').replace(/^\s*[-•*]\s+/gm, '').replace(/\s+/g, ' ');
 
-function bubble(who, html, raw = false) {
-  msgs.querySelector('.ai-sugg')?.remove();
-  msgs.insertAdjacentHTML('beforeend', `<div class="ai-msg ${who === 'me' ? 'me' : 'bot'}">${raw ? html : esc(html)}</div>`);
-  msgs.scrollTop = msgs.scrollHeight;
-  return msgs.lastElementChild;
+// длинную фразу режем по запятой или пробелу, чтобы она целиком помещалась в блок
+function split(sentence) {
+  const out = [];
+  let s = sentence.trim();
+  while (s.length > MAX_CHUNK) {
+    let cut = s.lastIndexOf(', ', MAX_CHUNK);
+    if (cut < MAX_CHUNK * 0.4) cut = s.lastIndexOf(' ', MAX_CHUNK);
+    if (cut <= 0) cut = MAX_CHUNK;
+    out.push(s.slice(0, cut + 1).trim());
+    s = s.slice(cut + 1).trim();
+  }
+  if (s) out.push(s);
+  return out;
 }
+
+const say = {
+  buf: '',
+  queue: [],
+  timer: 0,
+  until: 0,
+  // поток текста (голос приходит кусками): готовые предложения — в очередь, хвост ждёт продолжения
+  feed(text) {
+    this.buf += text;
+    const re = /^([\s\S]*?[.!?…]+["»)]*)\s+([\s\S]*)$/;
+    let m;
+    while ((m = this.buf.match(re))) {
+      this.push(m[1]);
+      this.buf = m[2];
+    }
+  },
+  flush() {
+    if (this.buf.trim()) this.push(this.buf);
+    this.buf = '';
+  },
+  text(t) {
+    this.reset();
+    this.feed(plain(t) + ' ');
+    this.flush();
+  },
+  push(sentence) {
+    for (const part of split(plain(sentence))) if (part) this.queue.push(part);
+    this.pump();
+  },
+  // фраза держится столько, сколько её произносят (~65 мс на символ), затем её место занимает следующая
+  pump() {
+    clearTimeout(this.timer);
+    const wait = this.until - Date.now();
+    if (wait > 0) return void (this.timer = setTimeout(() => this.pump(), wait));
+    const next = this.queue.shift();
+    if (!next) return;
+    this.until = Date.now() + Math.max(1500, next.length * 65);
+    this.show(next);
+    if (this.queue.length) this.timer = setTimeout(() => this.pump(), this.until - Date.now());
+  },
+  show(sentence, cls = '') {
+    sayBox.querySelector('.ai-sugg')?.remove();
+    sayBox.querySelectorAll('.ai-line').forEach((old) => {
+      old.classList.add('out');
+      setTimeout(() => old.remove(), 450);
+    });
+    const words = sentence.split(' ');
+    const step = Math.min(70, 900 / words.length);
+    const line = document.createElement('div');
+    line.className = `ai-line ${cls}`;
+    line.innerHTML = words.map((w, i) => `<span style="animation-delay:${Math.round(i * step)}ms">${esc(w)}</span>`).join(' ');
+    sayBox.appendChild(line);
+  },
+  thinking() {
+    this.reset();
+    sayBox.querySelector('.ai-sugg')?.remove();
+    sayBox.querySelectorAll('.ai-line').forEach((old) => old.remove());
+    sayBox.insertAdjacentHTML('beforeend', '<div class="ai-line wait"><span class="spinner"></span> Смотрю данные…</div>');
+  },
+  reset() {
+    clearTimeout(this.timer);
+    this.buf = '';
+    this.queue = [];
+    this.until = 0;
+  },
+};
 
 // ── текстовый режим ─────────────────────────────────────────────────
 async function ask(q) {
   if (busyNow) return;
   if (voice.ws?.readyState === 1) {
-    bubble('me', q);
+    say.reset();
     voice.ws.send(JSON.stringify({ t: 'text', text: q }));
     return;
   }
   busyNow = true;
-  bubble('me', q);
-  const think = bubble('bot', '<span class="spinner"></span> Смотрю данные…', true);
+  say.thinking();
   history.push({ role: 'user', text: q });
   try {
     const res = await fetch(`${apiBase()}/api/assistant`, {
@@ -111,12 +176,12 @@ async function ask(q) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || res.status);
     history.push({ role: 'assistant', text: data.reply });
-    think.remove();
-    bubble('bot', format(data.reply), true);
+    say.text(data.reply);
     for (const a of data.actions) enqueue(a);
   } catch (e) {
-    think.remove();
-    bubble('bot', `Не получилось: ${e.message}`);
+    history.pop();
+    say.reset();
+    say.show(`Не получилось: ${e.message}`, 'err');
   } finally {
     busyNow = false;
   }
@@ -129,12 +194,6 @@ function setState(state, text) {
   stage.dataset.state = state;
   if (text) status.innerHTML = text;
   $('#ai-call').innerHTML = state === 'idle' ? `${icon('mic')}Поговорить голосом` : `${icon('stop')}Завершить разговор`;
-}
-
-function liveLine(who, text) {
-  if (!voice.cur || voice.cur.who !== who) voice.cur = { who, el: bubble(who, '') };
-  voice.cur.el.textContent += text;
-  msgs.scrollTop = msgs.scrollHeight;
 }
 
 function playPcm(b64) {
@@ -219,12 +278,11 @@ async function startVoice() {
     const m = JSON.parse(data);
     if (m.t === 'ready') setState('listening', '<b class="ok">● Слушаю</b> — спрашивайте');
     else if (m.t === 'audio') playPcm(m.d);
-    else if (m.t === 'in') liveLine('me', m.text);
-    else if (m.t === 'out') liveLine('bot', m.text);
-    else if (m.t === 'turn') voice.cur = null;
+    else if (m.t === 'out') say.feed(m.text); // слова пользователя ('in') не показываем
+    else if (m.t === 'turn') say.flush();
     else if (m.t === 'interrupted') {
       stopPlayback();
-      voice.cur = null;
+      say.reset();
     } else if (m.t === 'tool') status.innerHTML = '<span class="spinner"></span> Смотрю данные…';
     else if (m.t === 'ui') enqueue({ name: m.name, args: m.args });
     else if (m.t === 'error') toast(m.error, 'error');
@@ -373,4 +431,4 @@ function enqueue(action) {
 }
 
 // те же действия на экране доступны другим модулям (и для проверки без модели)
-export { enqueue as showOnScreen };
+export { enqueue as showOnScreen, say as subtitles };
