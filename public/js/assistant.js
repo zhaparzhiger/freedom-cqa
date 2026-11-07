@@ -94,44 +94,61 @@ function split(sentence) {
   return out;
 }
 
+const audioNow = () => voice.outCtx?.currentTime ?? 0;
+
 const say = {
   buf: '',
   queue: [],
   timer: 0,
   until: 0,
-  // поток текста (голос приходит кусками): готовые предложения — в очередь, хвост ждёт продолжения
-  feed(text) {
+  start: null, // голос: момент аудио, с которого звучит текущее предложение
+  // поток текста (голос приходит кусками): готовые предложения — в очередь, хвост ждёт продолжения.
+  // В голосе звук приходит быстрее, чем играет, поэтому каждое предложение привязано к моменту аудио,
+  // когда его начнут произносить: субтитр появляется вместе со звуком, а не раньше.
+  feed(text, voiced = false) {
+    if (voiced && this.start == null) this.start = voice.turnStart ?? Math.max(audioNow(), voice.playAt);
     this.buf += text;
     const re = /^([\s\S]*?[.!?…]+["»)]*)\s+([\s\S]*)$/;
     let m;
     while ((m = this.buf.match(re))) {
-      this.push(m[1]);
+      this.push(m[1], voiced ? this.start : 0);
+      // конец уже полученного звука ≈ конец этого предложения = начало следующего
+      if (voiced) this.start = Math.max(audioNow(), voice.playAt);
       this.buf = m[2];
     }
   },
-  flush() {
-    if (this.buf.trim()) this.push(this.buf);
+  flush(voiced = false) {
+    if (this.buf.trim()) this.push(this.buf, voiced ? (this.start ?? 0) : 0);
     this.buf = '';
+    this.start = null;
   },
   text(t) {
     this.reset();
     this.feed(plain(t) + ' ');
     this.flush();
   },
-  push(sentence) {
-    for (const part of split(plain(sentence))) if (part) this.queue.push(part);
+  push(sentence, at = 0) {
+    let offset = 0;
+    for (const part of split(plain(sentence))) {
+      if (!part) continue;
+      // вторая половина длинной фразы — когда до неё дойдёт речь (~15 символов в секунду)
+      this.queue.push({ text: part, at: at ? at + offset / 15 : 0, voiced: !!at });
+      offset += part.length + 1;
+    }
     this.pump();
   },
-  // фраза держится столько, сколько её произносят (~65 мс на символ), затем её место занимает следующая
+  // текст: фраза держится столько, сколько её читают (~65 мс на символ); голос: пока не зазвучит следующая
   pump() {
     clearTimeout(this.timer);
-    const wait = this.until - Date.now();
-    if (wait > 0) return void (this.timer = setTimeout(() => this.pump(), wait));
-    const next = this.queue.shift();
+    const next = this.queue[0];
     if (!next) return;
-    this.until = Date.now() + Math.max(1500, next.length * 65);
-    this.show(next);
-    if (this.queue.length) this.timer = setTimeout(() => this.pump(), this.until - Date.now());
+    let wait = this.until - Date.now();
+    if (next.at) wait = Math.max(next.voiced ? 0 : wait, (next.at - audioNow()) * 1000);
+    if (wait > 30) return void (this.timer = setTimeout(() => this.pump(), Math.min(wait, 500)));
+    this.queue.shift();
+    this.until = Date.now() + (next.voiced ? 600 : Math.max(1500, next.text.length * 65));
+    this.show(next.text);
+    if (this.queue.length) this.timer = setTimeout(() => this.pump(), 60);
   },
   show(sentence, cls = '') {
     sayBox.querySelector('.ai-sugg')?.remove();
@@ -160,6 +177,10 @@ const say = {
     this.buf = '';
     this.queue = [];
     this.until = 0;
+    this.start = null;
+  },
+  get talking() {
+    return this.queue.length > 0 || Date.now() < this.until;
   },
 };
 
@@ -192,11 +213,24 @@ async function ask(q) {
       say.thinking('Работаю на сайте…');
       const results = [];
       for (const c of data.pending.calls) results.push(await perform(c.name, c.args));
+      // экскурсия закончилась — окно возвращается сразу, финальная фраза придёт уже в него
+      if (data.pending.calls.some((c) => c.name === 'tour')) {
+        present.end();
+        say.thinking('Секунду…');
+      }
       data = await post({ resume: { ...data.pending, results } });
     }
     history.push({ role: 'assistant', text: data.reply });
-    say.text(data.reply);
-    for (const a of data.actions) enqueue(a);
+    const acts = data.actions || [];
+    if (acts.length >= 2) {
+      // несколько мест в одном ответе — показываем их по очереди, и каждая фраза звучит, пока подсвечено её место
+      const ss = sentences(data.reply);
+      const steps = acts.map((a, i) => ({ action: a, text: i === acts.length - 1 ? ss.slice(i).join(' ') : ss[i] || '' }));
+      await perform('tour', { steps });
+    } else {
+      say.text(data.reply);
+      for (const a of acts) enqueue(a);
+    }
   } catch (e) {
     history.pop();
     say.reset();
@@ -207,7 +241,14 @@ async function ask(q) {
 }
 
 // ── голосовой режим (Gemini Live) ───────────────────────────────────
-const voice = { ws: null, micCtx: null, micStream: null, outCtx: null, analyser: null, gain: null, playAt: 0, sources: new Set(), cur: null, raf: 0 };
+const voice = { ws: null, micCtx: null, micStream: null, outCtx: null, analyser: null, gain: null, playAt: 0, turnStart: null, sources: new Set(), cur: null, raf: 0 };
+
+// голос: дождаться, пока договорится уже полученная речь — только потом показывать следующее место,
+// иначе указатель убегает вперёд слов (звук приходит быстрее, чем играет)
+async function audioDrained(max = 25000) {
+  const t = Date.now();
+  while (voice.ws && voice.outCtx && audioNow() < voice.playAt - 0.12 && Date.now() - t < max) await sleep(80);
+}
 
 function setState(state, text) {
   stage.dataset.state = state;
@@ -225,6 +266,7 @@ function playPcm(b64) {
   src.buffer = buf;
   src.connect(voice.gain);
   voice.playAt = Math.max(voice.playAt, voice.outCtx.currentTime + 0.03);
+  if (voice.turnStart == null) voice.turnStart = voice.playAt; // отсюда зазвучит первое предложение ответа
   src.start(voice.playAt);
   voice.playAt += buf.duration;
   voice.sources.add(src);
@@ -297,11 +339,14 @@ async function startVoice() {
     const m = JSON.parse(data);
     if (m.t === 'ready') setState('listening', '<b class="ok">● Слушаю</b> — спрашивайте');
     else if (m.t === 'audio') playPcm(m.d);
-    else if (m.t === 'out') say.feed(m.text); // слова пользователя ('in') не показываем
-    else if (m.t === 'turn') say.flush();
-    else if (m.t === 'interrupted') {
+    else if (m.t === 'out') say.feed(m.text, true); // слова пользователя ('in') не показываем
+    else if (m.t === 'turn') {
+      say.flush(true);
+      voice.turnStart = null;
+    } else if (m.t === 'interrupted') {
       stopPlayback();
       say.reset();
+      voice.turnStart = null;
     } else if (m.t === 'tool') status.innerHTML = '<span class="spinner"></span> Смотрю данные…';
     else if (m.t === 'ui') enqueue({ name: m.name, args: m.args });
     else if (m.t === 'ui_call') perform(m.name, m.args).then((result) => ws.readyState === 1 && ws.send(JSON.stringify({ t: 'ui_result', id: m.id, result })));
@@ -359,9 +404,19 @@ function caption(html) {
   c.hidden = !html;
 }
 
-// режим показа: окно свёрнуто, аватар ходит по странице и подсвечивает то, о чём говорит.
-// Когда речь и действия закончились — указатель исчезает, окно возвращается.
+// Режим показа: окно свёрнуто, аватар ходит по странице и подсвечивает то, о чём говорит; его фразы — подписью у аватара.
+// Окно сворачивается, только когда это нужно:
+//  · экскурсия (tour) — несколько мест подряд;
+//  · голосом показывают второе место подряд;
+//  · подсвечиваемое место закрыто окном;
+//  · узкий экран, где окно закрывает интерфейс.
+// Ответ без показа и одна подсветка, которую окно не закрывает, — окно остаётся открытым.
+// Когда речь и действия закончились: указатель исчезает, свёрнутое окно возвращается.
 let jobs = 0;
+const hidePointer = () => {
+  $('.ai-pointer').hidden = true;
+  document.querySelectorAll('.ai-focus').forEach((x) => x.classList.remove('ai-focus'));
+};
 const present = {
   on: false,
   reopen: false,
@@ -371,18 +426,20 @@ const present = {
     if (this.on) return;
     this.on = true;
     this.reopen = !panel.hidden;
-    caption(''); // подпись от прошлого показа не должна мелькнуть
+    // фраза, которую Аудитор произносит прямо сейчас, переезжает к аватару; старая — не должна мелькнуть
+    const cur = sayBox.querySelector('.ai-line:not(.out)');
+    caption(cur && (say.talking || cur.classList.contains('wait')) ? cur.innerHTML : '');
     panel.hidden = true;
     fab.hidden = false;
     root.classList.add('presenting');
   },
-  idle(delay = 3000) {
+  idle(delay = 2500) {
     clearTimeout(this.timer);
-    if (!this.on) return;
     this.timer = setTimeout(() => {
-      const talking = say.queue.length || Date.now() < say.until || voice.sources.size;
-      if (jobs || talking || busyNow) return this.idle(1000);
-      this.end();
+      const talking = say.talking || voice.sources.size;
+      if (jobs || talking || busyNow) return this.idle(800);
+      if (this.on) this.end();
+      else hidePointer();
     }, delay);
   },
   end(open = this.reopen) {
@@ -390,8 +447,7 @@ const present = {
     if (!this.on) return;
     this.on = false;
     root.classList.remove('presenting');
-    $('.ai-pointer').hidden = true;
-    document.querySelectorAll('.ai-focus').forEach((x) => x.classList.remove('ai-focus'));
+    hidePointer();
     if (open) {
       panel.hidden = false;
       fab.hidden = true;
@@ -399,21 +455,29 @@ const present = {
   },
 };
 
+const overlaps = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
+
 async function pointTo(el, text) {
   if (!el) return;
-  // высокий блок целиком не влезет — показываем его начало
-  const tall = el.getBoundingClientRect().height > window.innerHeight * 0.6;
-  el.scrollIntoView({ behavior: 'smooth', block: tall ? 'start' : 'center' });
-  // ждём, пока плавная прокрутка остановится, иначе координаты устаревшие
-  let last = -1;
-  for (let i = 0; i < 15; i++) {
-    await sleep(90);
-    const top = el.getBoundingClientRect().top;
-    if (Math.abs(top - last) < 1) break;
-    last = top;
+  const top0 = el.getBoundingClientRect();
+  // высокий блок целиком не влезет — показываем его начало; то, что уже на экране, не прокручиваем
+  const tall = top0.height > window.innerHeight * 0.6;
+  const inView = top0.top >= 64 && top0.bottom <= window.innerHeight - 16;
+  if (!inView) {
+    el.scrollIntoView({ behavior: 'smooth', block: tall ? 'start' : 'center' });
+    // ждём, пока плавная прокрутка остановится, иначе координаты устаревшие
+    let last = -1;
+    for (let i = 0; i < 15; i++) {
+      await sleep(70);
+      const top = el.getBoundingClientRect().top;
+      if (Math.abs(top - last) < 1) break;
+      last = top;
+    }
   }
-  const p = $('.ai-pointer');
   const r = el.getBoundingClientRect();
+  // место закрыто окном ассистента — сворачиваем окно, иначе пользователь не увидит, о чём речь
+  if (!present.on && !panel.hidden && overlaps(r, panel.getBoundingClientRect())) present.start();
+  const p = $('.ai-pointer');
   p.hidden = false;
   // своя подпись действия; без неё остаётся текущая фраза Аудитора
   if (text) caption(esc(text));
@@ -422,9 +486,10 @@ async function pointTo(el, text) {
   const x = Math.max(8, Math.min(window.innerWidth - 400, r.left + Math.min(r.width * 0.25, 160)));
   const y = Math.min(window.innerHeight - 120, Math.max(90, (tall ? Math.max(r.top, 70) : r.top) - 58));
   p.style.transform = `translate(${x}px, ${y}px)`;
-  document.querySelectorAll('.ai-focus').forEach((x) => x.classList.remove('ai-focus'));
-  await sleep(500);
+  // подсветка переходит на новое место сразу, пока аватар летит (полёт — 0,7 с)
+  document.querySelectorAll('.ai-focus').forEach((x) => x !== el && x.classList.remove('ai-focus'));
   el.classList.add('ai-focus');
+  await sleep(350);
 }
 
 async function run(a) {
@@ -477,14 +542,23 @@ async function run(a) {
 let chain = Promise.resolve();
 const recent = new Map(); // ключ действия → время: голосовая модель иногда повторяет ту же подсветку
 
-// любое действие на экране: окно сворачивается, после последнего действия и конца речи — возвращается
-function schedule(fn, visible = true) {
+// любое действие на экране идёт в общую очередь. kind: 'hidden' — ничего не показывает (снимок экрана),
+// 'show' — одно место (окно остаётся, если не мешает), 'tour' — несколько мест подряд (окно сворачивается)
+let lastShownAt = 0;
+function schedule(fn, kind = 'show') {
   jobs++;
   const job = chain.then(async () => {
-    if (visible) present.start(); // снимок экрана ничего не показывает — окно не трогаем
+    if (kind !== 'hidden') {
+      clearTimeout(present.timer);
+      // голос: сначала договариваем уже сказанное, потом переводим указатель — слова и подсветка совпадают
+      if (voice.ws) await audioDrained();
+      const series = voice.ws && Date.now() - lastShownAt < 20000; // голосом показывают места одно за другим
+      if (kind === 'tour' || series || window.innerWidth < 720) present.start();
+    }
     try {
       return await fn();
     } finally {
+      if (kind !== 'hidden') lastShownAt = Date.now();
       jobs--;
       present.idle();
     }
@@ -498,41 +572,82 @@ function enqueue(action) {
   const key = [action.name, g.page, g.conversation_id, g.criterion_id, g.index, (g.conversation_ids || []).join(',')].join('|');
   if (Date.now() - (recent.get(key) || 0) < 15000) return;
   recent.set(key, Date.now());
-  schedule(async () => {
-    await run(action);
-    await sleep(1200);
-  }).catch((e) => console.warn('[assistant action]', action.name, e));
+  schedule(() => run(action)).catch((e) => console.warn('[assistant action]', action.name, e));
 }
 
-// экскурсия по странице: аватар переходит от блока к блоку, подсвечивает его и рассказывает субтитрами
+// шаг экскурсии — место на текущем экране (ref из снимка) или место в данных (диалог, критерий, реплика, раздел)
+async function showStep(s) {
+  if (s.action) {
+    await run(s.action);
+    return s.action.name;
+  }
+  if (s.ref) return (await act('highlight', { ref: s.ref }, pointTo)).error ? null : s.ref;
+  const id = s.conversation_id;
+  const step =
+    id && s.criterion_id ? { name: 'point_at_criterion', args: { conversation_id: id, criterion_id: s.criterion_id } }
+    : id && Number.isFinite(s.message_index) ? { name: 'point_at_message', args: { conversation_id: id, index: s.message_index } }
+    : s.conversation_ids?.length ? { name: 'point_at_rows', args: { conversation_ids: s.conversation_ids } }
+    : id ? { name: 'open_conversation', args: { conversation_id: id } }
+    : s.page ? { name: 'open_page', args: { page: s.page } }
+    : null;
+  if (step) await run(step);
+  return step ? step.name : 'text';
+}
+
+// экскурсия: аватар переходит к месту, подсвечивает его, и сразу идёт пояснение именно об этом месте.
+// Следующее место — только когда пояснение дочитано/договорено.
 async function tour(steps = []) {
   const shown = [];
-  for (const s of steps.slice(0, 10)) {
-    const r = await act('highlight', { ref: s.ref }, pointTo);
-    if (r.error) continue;
-    shown.push(s.ref);
+  steps = steps.slice(0, 10);
+  // все шаги — места одной страницы: идём сверху вниз, чтобы указатель не прыгал (текст остаётся при своём месте)
+  if (steps.length > 1 && steps.every((s) => s.ref)) {
+    const y = (s) => {
+      const el = document.querySelector(`[data-ai-ref="${CSS.escape(String(s.ref))}"]`);
+      return el ? el.getBoundingClientRect().top + window.scrollY : Infinity;
+    };
+    const x = (s) => document.querySelector(`[data-ai-ref="${CSS.escape(String(s.ref))}"]`)?.getBoundingClientRect().left ?? 0;
+    steps = steps.map((s) => ({ s, y: Math.round(y(s) / 40), x: x(s) })).sort((a, b) => a.y - b.y || a.x - b.x).map((o) => o.s);
+  }
+  for (const s of steps) {
+    if (!voice.ws) caption(''); // в полёте к новому месту старая фраза не висит рядом с ним
+    const done = await showStep(s);
+    if (!done) continue;
+    shown.push(done);
+    const text = plain(String(s.text || '')).trim();
+    if (!text) continue;
+    if (voice.ws) {
+      // голосом пояснение произносит модель — держим место столько, сколько его обычно говорят
+      await sleep(Math.max(1500, text.length * 60));
+      continue;
+    }
     say.reset();
-    say.feed(plain(String(s.text || '')) + ' ');
+    say.feed(text + ' ');
     say.flush();
-    await sleep(400);
-    while (say.queue.length || Date.now() < say.until) await sleep(120);
+    await sleep(100);
+    while (say.talking) await sleep(80);
   }
   return shown.length
     ? { ok: `показано шагов: ${shown.length} (${shown.join(', ')}). Пользователь уже прочитал эти пояснения — в ответе их не повторяй, закончи одной короткой фразой.` }
-    : { error: 'ни один ref не найден — экран изменился. Вызови read_screen и повтори.' };
+    : { error: 'ни одно место не найдено — экран изменился. Вызови read_screen и повтори с новыми ref.' };
 }
 
 // действие на сайте (click, type_text, highlight, tour…): в общей очереди с показом, результат — модели
 function perform(name, args = {}) {
-  return schedule(async () => {
-    try {
-      if (name === 'tour') return await tour(args.steps);
-      return await act(name, args, pointTo);
-    } catch (e) {
-      return { error: String(e?.message || e) };
-    }
-  }, name !== 'read_screen');
+  return schedule(
+    async () => {
+      try {
+        if (name === 'tour') return await tour(args.steps);
+        return await act(name, args, pointTo);
+      } catch (e) {
+        return { error: String(e?.message || e) };
+      }
+    },
+    name === 'read_screen' ? 'hidden' : name === 'tour' ? 'tour' : 'show',
+  );
 }
+
+// предложения ответа — чтобы раздать их по местам, которые модель показала в одном ответе
+const sentences = (t) => (plain(t).match(/[^.!?…]+(?:[.!?…]+["»)]*|$)/g) || []).map((x) => x.trim()).filter(Boolean);
 
 // те же действия на экране доступны другим модулям (и для проверки без модели)
 export { enqueue as showOnScreen, say as subtitles, perform as controlSite };

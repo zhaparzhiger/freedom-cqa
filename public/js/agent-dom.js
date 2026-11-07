@@ -28,7 +28,6 @@ const BLOCKS = [
   '#view .ops-col',
   '#view section.sheet',
   '#view div.sheet',
-  '#view .sheet-h.sub',
   '#view .d-zones',
   '#view table',
   '#view .count-line',
@@ -125,6 +124,7 @@ export function snapshot({ textLimit = 1800, max = 220 } = {}) {
   for (const el of document.querySelectorAll(BLOCKS)) {
     if (blocks.length >= 45) break;
     if (!visible(el) || el.getBoundingClientRect().height < 24 || el.closest('ul.cards li')) continue;
+    if (!blockLabel(el)) continue; // пустой блок (холст, декор) нечем объяснить
     const ref = `b${++b}`;
     el.setAttribute('data-ai-ref', ref);
     refs.set(ref, el);
@@ -138,7 +138,7 @@ export function snapshot({ textLimit = 1800, max = 220 } = {}) {
     text: clean(view?.innerText, textLimit),
     elements: lines.join('\n'),
     blocks: blocks.join('\n'),
-    note: 'ref действуют до следующего снимка. Элементы «за экраном» можно нажимать сразу — прокрутка не нужна. Блоки (b…) и элементы (e…) выделяй через highlight или tour, когда объясняешь страницу.',
+    note: 'ref действуют до следующего снимка. Элементы «за экраном» можно нажимать сразу — прокрутка не нужна. Блоки (b…) и элементы (e…) выделяй через highlight или tour, когда объясняешь страницу. В подписи блока — его заголовок и текст: говори о блоке только то, что в ней есть.',
   };
 }
 
