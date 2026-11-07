@@ -8,7 +8,8 @@ import { save, now } from './store.js';
 import { findTraining, getAttempt, clientSystemPrompt, coachTips } from './training.js';
 import { handleAssistantLive } from './assistant-live.js';
 
-const LIVE_MODEL = process.env.LIVE_MODEL || 'gemini-live-2.5-flash-native-audio';
+// названия Live-моделей у Vertex и у Google AI Studio разные
+const LIVE_MODEL = process.env.LIVE_MODEL || (config.credentialsFile ? 'gemini-live-2.5-flash-native-audio' : 'gemini-3.1-flash-live-preview');
 const LIVE_LOCATION = process.env.LIVE_LOCATION || 'europe-west1';
 const MAX_MS = 6 * 60_000;
 
@@ -124,7 +125,8 @@ async function handle(ws, token, attemptId) {
           clientSystemPrompt(t) +
           '\nЭто ТЕЛЕФОННЫЙ ЗВОНОК в поддержку. Оператор говорит первым — дождись его приветствия, затем коротко изложи свой вопрос. Говори живо, как обычный человек по телефону, без списков.',
         speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: 'Kore' } } },
-        inputAudioTranscription: { languageCodes: [lang, 'ru-RU'].filter((v, i, s) => s.indexOf(v) === i) },
+        // подсказка языков распознавания есть только у Vertex
+        inputAudioTranscription: config.credentialsFile ? { languageCodes: [lang, 'ru-RU'].filter((v, i, s) => s.indexOf(v) === i) } : {},
         outputAudioTranscription: {},
         realtimeInputConfig: {
           automaticActivityDetection: { startOfSpeechSensitivity: StartSensitivity.START_SENSITIVITY_LOW, prefixPaddingMs: 300, silenceDurationMs: 800 },

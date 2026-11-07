@@ -283,6 +283,22 @@ export async function runPipeline(record, checklist, { model }) {
       }
     }),
   );
+  // упавшие агенты (обычно лимит запросов) — ещё одна попытка после основного прохода, по одному
+  for (const st of firstPass.filter((x) => x.error)) {
+    const c = checklist.criteria.find((x) => x.id === st.criterionId);
+    try {
+      await new Promise((r) => setTimeout(r, 5000));
+      const r = await criterionAgent(checklist, c, record, transcript, mapText, model);
+      track(r.res);
+      items[c.id] = r.item;
+      Object.assign(st, { error: undefined, retried: true, ms: r.res.ms, tokens: r.res.usage.input + r.res.usage.output, answer: r.item.answer, confidence: r.item.confidence });
+    } catch (e) {
+      st.error = e.message;
+    }
+  }
+  // без ответа хотя бы по одному критерию оценка неполная — пусть пакетная оценка повторит диалог
+  const lost = firstPass.filter((x) => x.error).map((x) => x.criterionId);
+  if (lost.length) throw new Error(`Не удалось оценить критерии ${lost.join(', ')}: ${firstPass.find((x) => x.error).error.slice(0, 160)}`);
   steps.push(...firstPass);
 
   // 3

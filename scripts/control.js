@@ -54,16 +54,19 @@ try {
   log(`загружено ${ids.length} диалогов в набор «${group}»${imp.errors?.length ? `, с ошибками формата ${imp.errors.length}` : ''}`);
   if (ids.length !== EXPECT) log(`ВНИМАНИЕ: ожидалось ${EXPECT} диалогов`);
 
-  // 2. оценка + один повтор упавших
-  let job = await runJob(ids);
-  if (job.failed) {
-    const failed = job.errors.map((e) => e.conversation_id);
-    log(`повторяю упавшие: ${failed.join(', ')}`);
-    job = await runJob(failed);
+  // 2. оценка + до двух повторов для упавших и неполных диалогов
+  await runJob(ids);
+  let res = await api('GET', `/api/results?group=${encodeURIComponent(group)}`);
+  for (let round = 1; round <= 2; round++) {
+    const bad = res.doc.results.filter((r) => r.status !== 'ok').map((r) => r.conversation_id);
+    if (!bad.length) break;
+    log(`повтор ${round}: ${bad.join(', ')}`);
+    await new Promise((r) => setTimeout(r, 15000)); // даём лимиту запросов восстановиться
+    await runJob(bad);
+    res = await api('GET', `/api/results?group=${encodeURIComponent(group)}`);
   }
 
   // 3. выгрузка и проверка
-  const res = await api('GET', `/api/results?group=${encodeURIComponent(group)}`);
   fs.mkdirSync('results/prod', { recursive: true });
   fs.writeFileSync(OUT, JSON.stringify(res.doc, null, 2) + '\n', 'utf8');
   log(`${OUT}: ${res.count} записей, со status=error: ${res.errors}`);

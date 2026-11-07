@@ -133,7 +133,7 @@ async function postModel(body, model) {
   const backoff = (attempt) => Math.min(20_000, 2000 * 2 ** attempt) + Math.random() * 3000;
   const pool = [model, ...config.fallbackModels.filter((m) => m !== model)];
   let pick = 0;
-  for (let attempt = 0; attempt < 9; attempt++) {
+  for (let attempt = 0; attempt < 12; attempt++) {
     model = pool[pick % pool.length];
     let target;
     try {
@@ -173,8 +173,12 @@ async function postModel(body, model) {
     }
     if (![0, 429, 500, 502, 503, 504].includes(res.status)) break;
     pick++;
-    // все модели пула уже пробовали — пауза перед следующим кругом
-    if (res.status !== 429 || pick % pool.length === 0) await sleep(backoff(attempt));
+    // все модели пула уже пробовали — пауза перед следующим кругом.
+    // Бесплатный тариф AI Studio сам говорит, сколько ждать («retryDelay»: «23s») — ждём не меньше.
+    if (res.status !== 429 || pick % pool.length === 0) {
+      const hint = Number((errText.match(/"retryDelay":\s*"(\d+(?:\.\d+)?)s"/) || [])[1] || 0) * 1000;
+      await sleep(Math.max(backoff(attempt), hint ? hint + 500 + Math.random() * 1500 : 0));
+    }
   }
   throw lastError;
 }

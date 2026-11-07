@@ -6,7 +6,8 @@ import { GoogleGenAI, Modality, StartSensitivity } from '@google/genai';
 import { config } from './env.js';
 import { TOOLS, SYSTEM, dataTools, UI_TOOLS } from './assistant.js';
 
-const LIVE_MODEL = process.env.LIVE_MODEL || 'gemini-live-2.5-flash-native-audio';
+// названия Live-моделей у Vertex и у Google AI Studio разные
+const LIVE_MODEL = process.env.LIVE_MODEL || (config.credentialsFile ? 'gemini-live-2.5-flash-native-audio' : 'gemini-3.1-flash-live-preview');
 const LIVE_LOCATION = process.env.LIVE_LOCATION || 'europe-west1';
 const VOICE = process.env.ASSISTANT_VOICE || 'Charon';
 const MAX_MS = 10 * 60_000;
@@ -83,7 +84,8 @@ export async function handleAssistantLive(ws, initialRoute) {
         speechConfig: { voiceConfig: { prebuiltVoiceConfig: { voiceName: VOICE } } },
         tools: [{ functionDeclarations: TOOLS }],
         // без подсказки языков распознавание путает русский с другими языками
-        inputAudioTranscription: { languageCodes: ['ru-RU', 'kk-KZ'] },
+        // подсказка языков распознавания есть только у Vertex
+        inputAudioTranscription: config.credentialsFile ? { languageCodes: ['ru-RU', 'kk-KZ'] } : {},
         outputAudioTranscription: {},
         contextWindowCompression: { slidingWindow: {} },
         // фон и стук не должны обрывать ответ: низкая чувствительность к началу речи
