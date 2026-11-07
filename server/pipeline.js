@@ -225,7 +225,7 @@ function verifierSchema(checklist) {
   };
 }
 
-async function verifierAgent(checklist, items, notes, record, transcript, mapText, model) {
+export async function verifierAgent(checklist, items, notes, record, transcript, mapText, model) {
   const sectionsById = Object.fromEntries((checklist.sections || []).map((s) => [s.id, s.name]));
   const verdicts = checklist.criteria
     .filter((c) => items[c.id])
@@ -306,16 +306,23 @@ export async function runPipeline(record, checklist, { model }) {
   steps.push({ agent: 'validator', title: 'Валидатор правил (код)', ms: 0, tokens: 0, notes });
 
   // 4
-  const ver = await verifierAgent(checklist, items, notes, record, transcript, mapText, model);
-  track(ver.res);
+  // проверяющий — дополнительная страховка: если он не ответил, оценка остаётся полной, просто без пересмотра
+  let ver;
+  try {
+    ver = await verifierAgent(checklist, items, notes, record, transcript, mapText, model);
+    track(ver.res);
+  } catch (e) {
+    ver = { checks: {}, res: null, error: e.message };
+  }
   const doubts = Object.entries(ver.checks).filter(([id, v]) => items[id] && (v.verdict === 'doubt' || notes[id]) && v.suggested_answer !== undefined);
   steps.push({
     agent: 'verifier',
     title: 'Агент-проверяющий',
-    ms: ver.res.ms,
-    tokens: ver.res.usage.input + ver.res.usage.output,
+    ms: ver.res?.ms || 0,
+    tokens: ver.res ? ver.res.usage.input + ver.res.usage.output : 0,
     checks: ver.checks,
     doubts: doubts.map(([id]) => id),
+    ...(ver.error ? { error: `не ответил: ${ver.error.slice(0, 160)}` } : {}),
   });
 
   // 5

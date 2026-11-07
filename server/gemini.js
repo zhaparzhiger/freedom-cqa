@@ -109,10 +109,16 @@ async function generateOnce({ system, user, schema, model = config.model, temper
       ...(seed !== undefined ? { seed } : {}),
     },
   };
-  const { json, model: used } = await postModel(body, model);
-  const cand = json.candidates?.[0];
-  const text = (cand?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || '').join('');
-  if (!text) throw new Error(`Пустой ответ модели (finishReason: ${cand?.finishReason || 'нет'})`);
+  // пустой ответ (без текста и без причины) бывает случайным сбоем — повторяем до трёх раз
+  let json, used, cand, text;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    ({ json, model: used } = await postModel(body, model));
+    cand = json.candidates?.[0];
+    text = (cand?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || '').join('');
+    if (text) break;
+    await sleep(1500 * (attempt + 1));
+  }
+  if (!text) throw new Error(`Пустой ответ модели (finishReason: ${cand?.finishReason || 'нет'}${json?.promptFeedback?.blockReason ? `, блокировка: ${json.promptFeedback.blockReason}` : ''})`);
   const u = json.usageMetadata || {};
   return {
     text,

@@ -70,11 +70,19 @@ node scripts/control.js --group <group_id> --push        # или --url "<ссы
 
 Gemini через Vertex AI, по умолчанию `gemini-3.5-flash-lite`, при перегрузке — `gemini-3.1-flash-lite`. Одна оценка в режиме конвейера — около 10 вызовов модели, ~27 тыс. токенов, **≈ $0,006–0,01 за диалог** (по ценам из `.env`; сверьте с прайсом Google). Режим «один вызов» — около $0,003. Стоимость каждой оценки видна в карточке и в аналитике.
 
-Точность проверялась на ручной разметке 30 русских чатов DEV по тексту чек-листа (`data/labels/dev-ru-reference.json`, это не эталон организаторов): совпадение ответов по критериям — 92,9%, среднее отклонение итога — 5,9 балла (конвейер, `gemini-3.5-flash-lite`).
+Точность проверялась на ручной разметке всех 65 диалогов DEV по тексту чек-листа (`data/labels/dev-*-reference.json`, это не эталон организаторов), конвейер на `gemini-3.5-flash-lite`:
+
+| Набор | Совпадение ответов по критериям |
+|---|---|
+| Русские чаты (30) | 92,5% |
+| Казахские чаты (15) | 91,7% |
+| Английские чаты (15) | 93,3% |
+| **Все чаты (60)** | **92,5%** |
+| Звонки (5, расшифровка речи с ошибками) | 70% |
 
 ```bash
 node scripts/eval.js --mode agents --ids p1-ru-001,p1-ru-002 --out data/runs/x.json   # пакетная оценка в файл
-node scripts/accuracy.js --labels data/labels/dev-ru-reference.json --run data/runs/x.json --verbose
+node scripts/accuracy.js --labels data/labels/dev-en-reference.json --verbose         # ru / kz / en / calls
 npm test                                                                                 # тесты подсчёта баллов
 ```
 

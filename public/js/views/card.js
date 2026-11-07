@@ -212,7 +212,9 @@ function pipelineHtml(ev) {
         </li>
         <li>
           <div class="pipe-head"><span class="pipe-n">4</span><b>Агент-проверяющий</b><span class="muted tiny">${sec(verifier?.ms)} · ${verifier?.tokens || 0} ток.</span></div>
-          <div class="pipe-body tiny">${verifier?.doubts?.length
+          <div class="pipe-body tiny">${verifier?.error
+            ? `<span class="warn-text">Проверяющий ${esc(verifier.error)} — оценка сохранена без перекрёстной проверки.</span>`
+            : verifier?.doubts?.length
             ? verifier.doubts.map((id) => `<div><b>${esc(id)}</b>: ${esc(verifier.checks[id]?.issue)} <span class="muted">(предлагает «${esc(answerLabel(crit(id), verifier.checks[id]?.suggested_answer))}»)</span></div>`).join('')
             : 'Противоречий между вердиктами не найдено.'}</div>
         </li>
