@@ -1,8 +1,9 @@
 // Страница тренажёра для оператора: разбор ошибок → ролевая тренировка (чат или голос) → оценка «было / стало».
-import { esc, fmt, toast, busy, answerLabel, answerTone, scoreTone } from './ui.js';
+import { esc, fmt, toast, busy, answerLabel, answerTone, band, icon, logo, stateTag, critState } from './ui.js';
 
 const token = decodeURIComponent(location.pathname.split('/').filter(Boolean)[1] || '');
 const view = document.getElementById('tr-view');
+document.getElementById('brandMark').innerHTML = logo();
 const api = async (method, path, body) => {
   const res = await fetch(`/api/train/${encodeURIComponent(token)}${path}`, {
     method,
@@ -15,12 +16,13 @@ const api = async (method, path, body) => {
 };
 
 let info = null;
+const ring = () => Array.from({ length: 28 }, (_, i) => `<i style="--k:${i};--h:${30 + ((i * 37) % 70)}%"></i>`).join('');
 
 async function boot() {
   try {
     info = await api('GET', '');
   } catch (e) {
-    view.innerHTML = `<div class="empty"><h2>Ссылка не работает</h2><p>${esc(e.message)}</p></div>`;
+    view.innerHTML = `<div class="sheet empty"><b>Ссылка не работает</b>${esc(e.message)}</div>`;
     return;
   }
   document.getElementById('tr-sub').textContent = `Диалог ${info.conversationId}`;
@@ -32,37 +34,34 @@ function renderIntro() {
   const best = info.attempts.filter((a) => a.total != null).sort((a, b) => b.total - a.total)[0];
   const voiceOk = info.language !== 'KZ';
   view.innerHTML = `
-    <section class="tr-hero panel">
-      <div class="tiny muted">Тренировка по реальному диалогу</div>
-      <h1>${esc(info.title)}</h1>
-      <div class="tr-scores">
-        <div><div class="tiny muted">Ваш балл в диалоге</div><div class="score-big ${scoreTone(info.originalTotal)}">${fmt(info.originalTotal)}<small>/100</small></div></div>
-        ${best ? `<div><div class="tiny muted">Лучшая тренировка</div><div class="score-big ${scoreTone(best.total)}">${fmt(best.total)}<small>/100</small></div></div>` : ''}
-      </div>
+    <header class="head"><div><span class="cap">Тренировка по реальному диалогу</span><h1>${esc(info.title)}</h1></div></header>
+    <section class="score tr-hero">
+      <div><span class="cap">Ваш балл в диалоге</span><div class="total">${fmt(info.originalTotal)}</div></div>
+      <div class="secs">${best ? `<div><span>Лучшая тренировка</span><b>${fmt(best.total)}</b></div>` : ''}<div><span>Ошибок к разбору</span><b>${info.mistakes.length}</b></div><div><span>Попыток</span><b>${info.attempts.length}</b></div></div>
     </section>
 
-    <h2 class="tr-h">Что пошло не так</h2>
-    ${info.mistakes.length ? `<div class="tr-mistakes">${info.mistakes.map((m) => `
-      <article class="panel tr-mistake">
-        <div class="tr-mistake-head"><b>${esc(m.name)}</b><span class="tag ${m.criterionId === 'c08' || /груб/i.test(m.name) ? 'bad' : 'mid'}">${esc(m.answer === 'yes' ? 'нарушение' : m.answer === 'no' ? 'Нет' : `${m.answer} баллов`)}</span></div>
+    <section class="sheet tr-sec">
+      <div class="sheet-h"><div><h2>Что пошло не так</h2><p>По оценке исходного диалога</p></div></div>
+      ${info.mistakes.length ? `<ul class="tr-mistakes">${info.mistakes.map((m) => `
+        <li><div class="tr-m-h"><b>${esc(m.name)}</b><span class="tag ${m.criterionId === 'c08' || /груб/i.test(m.name) ? 'bad' : 'mid'}">${esc(m.answer === 'yes' ? 'нарушение' : m.answer === 'no' ? 'Нет' : `${m.answer} баллов`)}</span></div>
         <p>${esc(m.explanation)}</p>
-        ${m.advice ? `<p class="advice"><b>Как надо:</b> ${esc(m.advice)}</p>` : ''}
-      </article>`).join('')}</div>` : '<p class="muted">Ошибок не найдено — можно потренироваться для закрепления.</p>'}
-
-    <section class="panel tr-start">
-      <h2>Пройдите этот диалог заново</h2>
-      <p class="muted">ИИ сыграет того же клиента с тем же вопросом. Коуч подскажет по ходу, а в конце диалог оценят по тому же чек-листу.</p>
-      <div class="tr-modes">
-        <button class="btn primary" data-start="text">💬 Тренировка в чате</button>
-        <button class="btn" data-start="voice" ${voiceOk ? '' : 'disabled title="Голос пока доступен для русского и английского"'}>🎙 Голосом, как звонок</button>
-      </div>
-      ${voiceOk ? '' : '<p class="tiny muted">Голосовой режим для казахского языка пока не поддерживается — используйте чат.</p>'}
-      <p class="tiny muted">Клиент сначала писал боту: «${esc(info.contextBeforeOperator)}»</p>
+        ${m.advice ? `<div class="coach"><span class="cap">Как надо</span>${esc(m.advice)}</div>` : ''}</li>`).join('')}</ul>` : '<div class="empty">Ошибок не найдено — можно потренироваться для закрепления.</div>'}
     </section>
 
-    ${info.attempts.length ? `<h2 class="tr-h">Ваши попытки</h2><div class="tr-attempts">${info.attempts.map((a) => `
-      <div class="panel tr-attempt"><span>${a.mode === 'voice' ? '🎙 Голос' : '💬 Чат'} · ${new Date(a.startedAt).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
-      <b class="score ${scoreTone(a.total)}">${a.total == null ? 'не завершена' : fmt(a.total)}</b></div>`).join('')}</div>` : ''}`;
+    <section class="incoming" data-call>
+      <div class="who"><span class="ringer">${icon('call')}</span><div><h2>Пройдите этот диалог заново</h2><p>ИИ сыграет того же клиента с тем же вопросом. Коуч подскажет по ходу, а в конце диалог оценят по тому же чек-листу.</p></div></div>
+      <div class="wave-ring" aria-hidden="true">${ring()}</div>
+      <div class="tr-modes">
+        <button class="btn lime big" data-start="text">${icon('chat')}Тренировка в чате</button>
+        <button class="btn big tr-voice-btn" data-start="voice" ${voiceOk ? '' : 'disabled title="Голос пока доступен для русского и английского"'}>${icon('mic')}Голосом, как звонок</button>
+      </div>
+      ${voiceOk ? '' : '<p class="small">Голосовой режим для казахского языка пока не поддерживается — используйте чат.</p>'}
+      <p class="small">Клиент сначала писал боту: «${esc(info.contextBeforeOperator)}»</p>
+    </section>
+
+    ${info.attempts.length ? `<section class="sheet tr-sec"><div class="sheet-h"><div><h2>Ваши попытки</h2></div></div><ul class="live">${info.attempts.map((a) => `
+      <li><span>${a.mode === 'voice' ? 'Голос' : 'Чат'} · ${new Date(a.startedAt).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+      <b class="${a.total == null ? 'muted' : `c-${band(a.total)}`}">${a.total == null ? 'не завершена' : fmt(a.total)}</b></li>`).join('')}</ul></section>` : ''}`;
   view.querySelectorAll('[data-start]').forEach((b) => b.addEventListener('click', () => start(b.dataset.start, b)));
 }
 
@@ -80,27 +79,27 @@ async function start(mode, btn) {
 
 // ── 2а. чат ──────────────────────────────────────────────────────────
 function bubble(m) {
-  return `<div class="msg msg-${esc(m.speaker)}"><div class="msg-meta"><span class="msg-role">${m.speaker === 'operator' ? 'Вы' : m.speaker === 'client' ? 'Клиент' : 'Система'}</span><span class="msg-time">${esc(m.timestamp || '')}</span></div><div class="msg-text">${esc(m.text)}</div></div>`;
+  const who = m.speaker === 'operator' ? 'Вы' : m.speaker === 'client' ? 'ИИ-клиент' : 'Система';
+  return `<div class="msg ${esc(m.speaker)}"><small><span>${who}</span>${m.timestamp ? `<span>${esc(m.timestamp)}</span>` : ''}</small><span class="msg-text">${esc(m.text)}</span></div>`;
 }
 const tipsHtml = (tips) =>
-  tips?.length ? `<div class="tr-tips">${tips.map((t) => `<div class="tr-tip ${t.type}">${t.type === 'good' ? '✓' : '!'} ${esc(t.text)}</div>`).join('')}</div>` : '';
+  tips?.length ? `<div class="tr-tips">${tips.map((t) => `<div class="tr-tip ${t.type === 'good' ? 'good' : 'warn'}">${t.type === 'good' ? icon('check') : icon('alert')}${esc(t.text)}</div>`).join('')}</div>` : '';
+
+function chatHead(title, right) {
+  return `<header class="head tr-chat-head"><div><a class="crumb" href="#" id="tr-back">${icon('left')}К разбору</a><h1>${esc(title)}</h1></div><div class="acts">${right}</div></header>`;
+}
 
 function renderChat(attempt) {
   view.innerHTML = `
-    <div class="tr-chat-wrap">
-      <div class="tr-chat-head">
-        <button class="btn small ghost" id="tr-back">← Разбор</button>
-        <b>${esc(info.title)}</b>
-        <button class="btn small primary" id="tr-finish">Завершить и оценить</button>
-      </div>
-      <div class="tr-chat panel">
-        <div class="transcript" id="tr-msgs">${attempt.transcript.map(bubble).join('')}</div>
-        <form class="tr-input" id="tr-form">
-          <textarea name="text" rows="2" placeholder="Ваш ответ клиенту…  (Enter — отправить, Shift+Enter — новая строка)" required></textarea>
-          <button class="btn primary" type="submit">Отправить</button>
-        </form>
-      </div>
-    </div>`;
+    ${chatHead(info.title, `<button class="btn primary" id="tr-finish">${icon('check')}Завершить и оценить</button>`)}
+    <section class="sheet tr-chat">
+      <div class="sheet-h"><div><h2>Разговор</h2><p>Коуч подсказывает по ходу — зелёным то, что получилось, янтарным — что поправить</p></div></div>
+      <div class="msgs" id="tr-msgs">${attempt.transcript.map(bubble).join('')}</div>
+      <form class="composer" id="tr-form">
+        <textarea class="textarea" name="text" rows="2" placeholder="Ваш ответ клиенту…  (Enter — отправить, Shift+Enter — новая строка)" required aria-label="Ваш ответ"></textarea>
+        <button class="btn primary" type="submit" aria-label="Отправить">${icon('send')}</button>
+      </form>
+    </section>`;
   const msgs = view.querySelector('#tr-msgs');
   const scroll = () => (msgs.scrollTop = msgs.scrollHeight);
   scroll();
@@ -119,10 +118,10 @@ function renderChat(attempt) {
     if (!text) return;
     ta.value = '';
     msgs.insertAdjacentHTML('beforeend', bubble({ speaker: 'operator', text, timestamp: '' }));
-    msgs.insertAdjacentHTML('beforeend', '<div class="tr-typing muted tiny" id="tr-typing">Клиент печатает…</div>');
+    msgs.insertAdjacentHTML('beforeend', '<div class="tr-typing" id="tr-typing"><span class="spinner"></span> Клиент печатает…</div>');
     scroll();
     const btn = e.submitter;
-    busy(btn, true, '…');
+    busy(btn, true, '');
     try {
       const r = await api('POST', `/attempts/${attempt.id}/message`, { text });
       view.querySelector('#tr-typing')?.remove();
@@ -137,31 +136,29 @@ function renderChat(attempt) {
       ta.focus();
     }
   });
-  view.querySelector('#tr-back').addEventListener('click', () => boot());
+  view.querySelector('#tr-back').addEventListener('click', (e) => {
+    e.preventDefault();
+    boot();
+  });
   view.querySelector('#tr-finish').addEventListener('click', (e) => finish(attempt, e.currentTarget));
 }
 
 // ── 2б. голос (Gemini Live) ─────────────────────────────────────────
 function renderVoice(attempt) {
   view.innerHTML = `
-    <div class="tr-voice">
-      <div class="tr-chat-head">
-        <button class="btn small ghost" id="tr-back">← Разбор</button>
-        <b>${esc(info.title)}</b>
-        <span></span>
+    ${chatHead(info.title, '')}
+    <section class="incoming tr-call">
+      <div class="who"><span class="ringer">${icon('call')}</span><div><h2 id="tr-state">Нажмите «Позвонить» и поздоровайтесь</h2><p>Клиент ждёт вашего приветствия. Нужен микрофон, разговор длится до 6 минут.</p></div></div>
+      <div class="tr-level" aria-hidden="true"><span id="tr-level"></span></div>
+      <div class="tr-modes">
+        <button class="btn lime big" id="tr-call">${icon('call')}Позвонить</button>
+        <button class="btn big tr-voice-btn" id="tr-hang" disabled>${icon('stop')}Положить трубку</button>
       </div>
-      <section class="panel tr-call">
-        <div class="tr-call-state" id="tr-state">Нажмите «Позвонить» и поздоровайтесь — клиент ждёт вашего приветствия.</div>
-        <div class="tr-level"><span id="tr-level"></span></div>
-        <div class="tr-modes">
-          <button class="btn primary" id="tr-call">📞 Позвонить</button>
-          <button class="btn" id="tr-hang" disabled>Положить трубку</button>
-        </div>
-        <p class="tiny muted">Нужен микрофон. Разговор длится до 6 минут. Расшифровка ниже — по ней коуч даёт подсказки, а в конце звонок оценят.</p>
-      </section>
-      <div class="tr-chat panel"><div class="transcript" id="tr-msgs"></div></div>
-      <button class="btn primary tr-finish-voice" id="tr-finish" disabled>Получить оценку звонка</button>
-    </div>`;
+    </section>
+    <section class="sheet tr-chat tr-chat-voice">
+      <div class="sheet-h"><div><h2>Расшифровка</h2><p>По ней коуч даёт подсказки, а в конце звонок оценят</p></div><button class="btn primary sm" id="tr-finish" disabled>${icon('check')}Получить оценку звонка</button></div>
+      <div class="msgs" id="tr-msgs"></div>
+    </section>`;
   const msgs = view.querySelector('#tr-msgs');
   const state = view.querySelector('#tr-state');
   let ws = null;
@@ -210,9 +207,11 @@ function renderVoice(attempt) {
     } catch {}
     micStream?.getTracks().forEach((t) => t.stop());
     micCtx?.close().catch(() => {});
+    if (!view.contains(state)) return; // экран уже сменился
     view.querySelector('#tr-call').disabled = false;
     view.querySelector('#tr-hang').disabled = true;
-    view.querySelector('#tr-finish').disabled = !msgs.querySelector('.msg-operator');
+    view.querySelector('#tr-finish').disabled = !msgs.querySelector('.msg.operator');
+    view.querySelector('.tr-call')?.classList.remove('live');
     state.textContent = 'Звонок завершён. Можно получить оценку или позвонить ещё раз.';
   };
 
@@ -243,7 +242,8 @@ function renderVoice(attempt) {
     ws.onmessage = ({ data }) => {
       const m = JSON.parse(data);
       if (m.t === 'ready') {
-        state.innerHTML = '<b class="good-text">● На линии.</b> Говорите — клиент слышит вас.';
+        state.innerHTML = '<span class="ok">● На линии.</span> Говорите — клиент слышит вас.';
+        view.querySelector('.tr-call')?.classList.add('live');
         view.querySelector('#tr-hang').disabled = false;
       } else if (m.t === 'audio') playPcm(m.d);
       else if (m.t === 'in') line('operator', m.text);
@@ -263,7 +263,8 @@ function renderVoice(attempt) {
     ws.onclose = () => hangup();
   });
   view.querySelector('#tr-hang').addEventListener('click', hangup);
-  view.querySelector('#tr-back').addEventListener('click', () => {
+  view.querySelector('#tr-back').addEventListener('click', (e) => {
+    e.preventDefault();
     hangup();
     boot();
   });
@@ -286,36 +287,31 @@ function renderResult(a, before) {
   const res = a.result;
   const delta = res.total != null && before != null ? res.total - before : null;
   view.innerHTML = `
-    <section class="panel tr-hero">
-      <div class="tiny muted">Результат тренировки</div>
-      <div class="tr-scores">
-        <div><div class="tiny muted">Было в диалоге</div><div class="score-big ${scoreTone(before)}">${fmt(before)}</div></div>
-        <div class="tr-arrow">→</div>
-        <div><div class="tiny muted">Стало на тренировке</div><div class="score-big ${scoreTone(res.total)}">${fmt(res.total)}</div></div>
-        ${delta != null ? `<div class="tag ${delta >= 0 ? 'good' : 'bad'} big">${delta >= 0 ? '+' : ''}${fmt(delta)}</div>` : ''}
-      </div>
-      ${res.grossError ? '<p class="tag bad big">⚠ На тренировке допущена грубая ошибка</p>' : ''}
+    <header class="head"><div><span class="cap">Результат тренировки</span><h1>${esc(info.title)}</h1></div></header>
+    <section class="score tr-hero">
+      <div><span class="cap">Стало на тренировке</span><span class="was">было ${fmt(before)}</span><div class="total">${fmt(res.total)}</div>
+        ${delta != null ? `<div class="verdict">${icon(delta >= 0 ? 'check' : 'alert')}${delta >= 0 ? '+' : '−'}${fmt(Math.abs(delta))} к исходному диалогу</div>` : ''}</div>
+      <div class="secs"><div><span>Было в диалоге</span><b>${fmt(before)}</b></div><div><span>Стало</span><b>${fmt(res.total)}</b></div></div>
+      ${res.grossError ? `<div class="crit-note">${icon('alert')}На тренировке допущена грубая ошибка</div>` : ''}
     </section>
-    <div class="criteria">
-      ${res.checklist.criteria.map((c) => {
-        const it = res.items.find((i) => i.criterionId === c.id);
+    <section class="sheet tr-sec">
+      <div class="sheet-h"><div><h2>По критериям</h2><p>Тот же чек-лист, что и у исходного диалога</p></div></div>
+      ${res.checklist.criteria.map((c, i) => {
+        const it = res.items.find((x) => x.criterionId === c.id);
         if (!it) return '';
         const fixed = info.mistakes.some((m) => m.criterionId === c.id) && answerTone(c, it.answer) === 'good';
-        return `<article class="crit">
-          <header class="crit-head"><div class="crit-name">${esc(c.name)}${fixed ? ' <span class="tag good">исправлено</span>' : ''}</div>
-          <span class="answer ${answerTone(c, it.answer)}">${esc(answerLabel(c, it.answer))}</span></header>
-          <p class="crit-expl">${esc(it.explanation)}</p>
-          ${it.advice ? `<p class="advice"><b>Совет:</b> ${esc(it.advice)}</p>` : ''}
-        </article>`;
+        return `<div class="cr ${critState(c, it.answer)} on"><div class="cr-h" role="presentation"><span class="cr-code">C${i + 1}</span><span class="cr-name">${esc(c.name)}${fixed ? '<small class="fixed">исправлено</small>' : ''}</span><span class="tag ${stateTag(critState(c, it.answer))}">${esc(answerLabel(c, it.answer))}</span><span></span><span></span></div>
+          <div class="cr-b"><p class="why">${esc(it.explanation)}</p>${it.advice ? `<div class="coach"><span class="cap">Совет</span>${esc(it.advice)}</div>` : ''}</div></div>`;
       }).join('')}
-    </div>
+    </section>
     <div class="tr-modes tr-end">
-      <button class="btn primary" id="tr-again">Ещё раз</button>
-      <button class="btn" id="tr-intro">К разбору</button>
+      <button class="btn primary big" id="tr-again">${icon('refresh')}Ещё раз</button>
+      <button class="btn big" id="tr-intro">К разбору</button>
     </div>`;
   view.querySelector('#tr-again').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
     info = await api('GET', '');
-    start(a.mode, e.currentTarget);
+    start(a.mode, btn);
   });
   view.querySelector('#tr-intro').addEventListener('click', boot);
 }

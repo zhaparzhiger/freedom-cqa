@@ -4,9 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Freedom CQA — оценка качества диалогов</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%231f8a4c'/%3E%3Cpath d='M9 22V10h13M9 16h9' stroke='white' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+  <meta name="description" content="Conversation Quality Analytics: оценка разговоров оператора, где каждый балл подтверждён репликой.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2312301F'/%3E%3Cpath d='M9 22V10h13M9 16h9' stroke='%23D3EE6A' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
+  <link rel="preload" href="fonts/geologica-cyrillic.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="fonts/fonts.css">
   <link rel="stylesheet" href="css/app.css">
-  <link rel="stylesheet" href="css/train.css">
+  <link rel="stylesheet" href="css/features.css">
   <script>
     // Настройка для встраивания (например, как HTML-веб-ресурс Dynamics 365):
     // window.CQA_CONFIG = { apiBase: 'https://cqa.example.com' };
@@ -14,26 +17,22 @@
   </script>
 </head>
 <body>
-  <div id="cqa-app" class="cqa">
-    <header class="topbar">
-      <a class="brand" href="#/">
-        <span class="brand-mark" aria-hidden="true">F</span>
-        <span class="brand-text">Freedom <b>CQA</b></span>
-      </a>
-      <nav class="nav" id="nav">
-        <a href="#/" data-nav="list">Диалоги</a>
-        <a href="#/appeals" data-nav="appeals">Апелляции <span class="nav-badge" id="appeals-badge" hidden></span></a>
-        <a href="#/checklists" data-nav="checklists">Чек-листы</a>
-        <a href="#/stats" data-nav="stats">Аналитика</a>
-      </nav>
-      <div class="role" role="group" aria-label="Роль">
-        <button type="button" data-role="employee">Сотрудник</button>
-        <button type="button" data-role="reviewer">Проверяющий</button>
+  <header class="top">
+    <div class="top-in" data-field="nav">
+      <a class="brand" href="#/" aria-label="Freedom CQA — главная"><span id="brandMark"></span><span class="word">CQA</span></a>
+      <nav class="nav" id="nav" aria-label="Разделы"></nav>
+      <div class="top-end">
+        <button class="demo-btn" type="button" id="tour-btn" aria-pressed="false" title="Пройти по экранам на реальных данных">Демо</button>
+        <div class="role" id="role" role="group" aria-label="Роль">
+          <button type="button" data-role="employee">Сотрудник</button>
+          <button type="button" data-role="reviewer">Проверяющий</button>
+        </div>
       </div>
-    </header>
-    <main id="view" class="view" tabindex="-1"></main>
-    <div id="toasts" class="toasts" aria-live="polite"></div>
-  </div>
+    </div>
+  </header>
+  <main class="page" id="view" tabindex="-1"></main>
+  <aside class="tour" id="tour" hidden aria-label="Демонстрация по экранам"></aside>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
   <script type="module" src="js/app.js"></script>
   <script type="module" src="js/assistant.js"></script>
 </body>

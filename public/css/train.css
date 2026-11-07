@@ -1,47 +1,52 @@
-/* Тренажёр оператора: отдельная страница по ссылке, в первую очередь под телефон. */
-.train-view { max-width: 880px; }
-.topbar-note { margin-left: auto; }
-.tr-hero h1 { margin: 4px 0 12px; }
-.tr-scores { display: flex; gap: 22px; align-items: flex-end; flex-wrap: wrap; }
-.tr-arrow { font-size: 28px; color: var(--cqa-muted); padding-bottom: 6px; }
-.tr-h { margin: 22px 0 10px !important; }
-.tr-mistakes { display: flex; flex-direction: column; gap: 10px; }
-.tr-mistake-head { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
-.tr-start { margin-top: 18px; }
-.tr-modes { display: flex; gap: 10px; flex-wrap: wrap; margin: 12px 0; }
-.tr-modes .btn { height: 44px; padding: 0 18px; font-size: 15px; }
-.tr-attempts { display: flex; flex-direction: column; gap: 8px; }
-.tr-attempt { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; }
-
-.tr-chat-wrap, .tr-voice { display: flex; flex-direction: column; gap: 12px; }
-.tr-chat-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
-.tr-chat-head b { flex: 1; text-align: center; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tr-chat { padding: 0; display: flex; flex-direction: column; height: calc(100vh - 170px); min-height: 380px; overflow: hidden; }
-.tr-voice .tr-chat { height: 46vh; }
-.tr-chat .transcript { flex: 1; }
-.tr-input { display: flex; gap: 8px; padding: 10px; border-top: 1px solid var(--cqa-border); background: var(--cqa-surface-2); align-items: flex-end; }
-.tr-input textarea { min-height: 44px; max-height: 160px; }
-.tr-input .btn { height: 44px; }
-.tr-typing { align-self: flex-start; padding: 2px 6px; }
-.tr-tips { display: flex; flex-direction: column; gap: 4px; align-self: flex-end; max-width: 88%; }
-.tr-tip { font-size: 12px; padding: 4px 10px; border-radius: 8px; }
-.tr-tip.good { background: var(--cqa-good-soft); color: var(--cqa-good); }
-.tr-tip.warn { background: var(--cqa-warn-soft); color: var(--cqa-warn); }
-.tr-call { text-align: center; }
-.tr-call-state { font-size: 15px; margin-bottom: 10px; }
-.tr-call .tr-modes { justify-content: center; }
-.tr-level { height: 6px; max-width: 280px; margin: 0 auto; border-radius: 3px; background: var(--cqa-surface-2); overflow: hidden; }
-.tr-level span { display: block; height: 100%; width: 0; background: var(--cqa-accent); transition: width .1s; }
-.tr-finish-voice { height: 44px; }
-.tr-end { justify-content: center; margin-top: 16px; }
-
-/* ссылка на тренировку в карточке диалога */
-.train-box { margin-bottom: 14px; }
-.train-link { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
-.train-link input { flex: 1; font-size: 12px; }
+/* Тренажёр оператора: отдельная страница по ссылке, в первую очередь под телефон. Основа — app.css и features.css. */
+.tr-page { max-width: 920px; display: grid; gap: 20px; }
+.tr-page > .head { margin-bottom: 0; }
+.tr-page .head .cap { margin-bottom: 6px; }
+.tr-page .head h1 { overflow-wrap: anywhere; }
+.top-in { gap: 18px; }
+.tr-sub { margin-left: auto; color: var(--on-forest-2); font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.tr-hero .total { font-size: 80px; }
+.tr-sec .sheet-h + .empty { padding: 28px 20px; }
+.tr-mistakes { list-style: none; margin: 0; padding: 0; }
+.tr-mistakes li { display: grid; gap: 8px; padding: 16px 20px; border-top: 1px solid var(--line); }
+.tr-mistakes li:first-child { border-top: 0; }
+.tr-mistakes p { margin: 0; color: var(--ink-2); }
+.tr-m-h { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.tr-m-h b { font-weight: 600; }
+.incoming .small { color: var(--on-forest-2); max-width: 560px; margin: 0; }
+.incoming p { max-width: 560px; }
+.tr-modes { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; }
+.incoming .tr-voice-btn { background: transparent; border-color: rgba(236, 243, 238, .35); color: var(--on-forest); }
+.incoming .tr-voice-btn:hover { border-color: var(--on-forest-2); }
+.incoming .tr-voice-btn:disabled { opacity: .45; }
+.incoming .ok { color: var(--lime); }
+.tr-call:not(.live) .ringer { animation-play-state: paused; }
+.tr-level { width: min(280px, 100%); height: 6px; border-radius: 3px; background: rgba(255, 255, 255, .12); overflow: hidden; }
+.tr-level span { display: block; height: 100%; width: 0; background: var(--lime); transition: width .1s; }
+.tr-chat-head .crumb { margin-bottom: 8px; }
+.tr-chat { display: flex; flex-direction: column; }
+.tr-chat .msgs { height: calc(100vh - 380px); min-height: 320px; }
+.tr-chat-voice .msgs { height: 42vh; min-height: 240px; }
+.tr-chat .msg .msg-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.tr-chat .msg.client { align-self: flex-start; }
+.tr-typing { align-self: flex-start; display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--ink-3); padding: 2px 4px; }
+.tr-tips { display: grid; gap: 4px; align-self: flex-end; max-width: 88%; }
+.tr-tip { display: flex; gap: 6px; align-items: flex-start; font-size: 13px; padding: 6px 10px; border-radius: 10px; }
+.tr-tip .ico { width: 14px; height: 14px; margin-top: 2px; }
+.tr-tip.good { background: var(--green-soft); color: var(--green-ink); }
+.tr-tip.warn { background: var(--amber-soft); color: #6E4300; }
+.composer .btn { height: 46px; width: 52px; padding: 0; }
+.tr-sec .cr-h { cursor: default; }
+.tr-sec .cr-h:hover { background: var(--paper-2); }
+.cr-name small.fixed { color: var(--green-ink); }
+.tr-end { margin-bottom: 20px; }
 
 @media (max-width: 720px) {
-  .tr-chat { height: calc(100vh - 150px); }
+  .tr-hero .total { font-size: 64px; }
   .tr-modes .btn { flex: 1 1 100%; }
-  .score-big { font-size: 34px; }
+  .tr-chat .msgs { height: calc(100vh - 330px); }
+  .tr-sec .cr-h { grid-template-columns: 24px minmax(0, 1fr) auto !important; }
+  .tr-sec .cr-h > span:empty { display: none; }
+  .tr-sec .cr-h .tag { display: inline-flex; }
+  .tr-sub { font-size: 13px; }
 }

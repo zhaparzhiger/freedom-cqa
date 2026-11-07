@@ -1,7 +1,8 @@
 // «Аудитор» — ИИ-ассистент руководителя КК. Текстом или голосом (Gemini Live) отвечает по данным платформы
 // и сам ведёт по интерфейсу: открывает разделы и диалоги, подводит аватар к строкам, критериям и репликам.
-import { esc, toast } from './ui.js';
+import { esc, toast, icon } from './ui.js';
 import { setListFilters } from './views/list.js';
+import { jump } from './views/card.js';
 
 const AVATAR_SRC = '/img/auditor.jpg';
 const ava = (cls = '') => `<img class="ai-img ${cls}" src="${AVATAR_SRC}" alt="" draggable="false">`;
@@ -26,20 +27,20 @@ root.innerHTML = `
   <section class="ai-panel" hidden aria-label="ИИ-ассистент Аудитор">
     <header class="ai-head">
       <span class="ai-face small">${ava()}</span>
-      <div><b>Аудитор</b><div class="tiny muted">ИИ-ассистент руководителя КК</div></div>
-      <button class="icon-btn" type="button" id="ai-close" aria-label="Свернуть">✕</button>
+      <div><b>Аудитор</b><div class="sub">ИИ-ассистент руководителя контроля качества</div></div>
+      <button class="icon-btn" type="button" id="ai-close" aria-label="Свернуть">${icon('x')}</button>
     </header>
     <div class="ai-stage" data-state="idle">
       <div class="ai-face big" id="ai-big">${ava()}<span class="ai-ring"></span></div>
       <div class="ai-status" id="ai-status">Поговорите со мной голосом — я покажу всё на экране</div>
-      <button class="btn primary ai-call" type="button" id="ai-call">🎙 Поговорить голосом</button>
+      <button class="btn lime ai-call" type="button" id="ai-call">${icon('mic')}Поговорить голосом</button>
     </div>
     <div class="ai-msgs" id="ai-msgs">
       <div class="ai-sugg">${SUGGEST.map((s) => `<button type="button" class="ai-chip">${esc(s)}</button>`).join('')}</div>
     </div>
     <form class="ai-input" id="ai-form">
-      <input name="q" placeholder="Или напишите вопрос…" autocomplete="off">
-      <button class="btn primary small" type="submit" aria-label="Отправить">→</button>
+      <input class="input" name="q" placeholder="Или напишите вопрос…" autocomplete="off" aria-label="Вопрос ассистенту">
+      <button class="btn primary" type="submit" aria-label="Отправить">${icon('send')}</button>
     </form>
   </section>
   <div class="ai-pointer" hidden><span class="ai-face small">${ava()}</span><div class="ai-caption"></div></div>`;
@@ -127,7 +128,7 @@ const voice = { ws: null, micCtx: null, micStream: null, outCtx: null, analyser:
 function setState(state, text) {
   stage.dataset.state = state;
   if (text) status.innerHTML = text;
-  $('#ai-call').textContent = state === 'idle' ? '🎙 Поговорить голосом' : '■ Завершить разговор';
+  $('#ai-call').innerHTML = state === 'idle' ? `${icon('mic')}Поговорить голосом` : `${icon('stop')}Завершить разговор`;
 }
 
 function liveLine(who, text) {
@@ -179,7 +180,7 @@ function animate() {
     }
     if (voice.ws) {
       if (speaking && stage.dataset.state !== 'speaking') setState('speaking', '<b>Говорит…</b> можно перебить голосом');
-      else if (!speaking && stage.dataset.state === 'speaking') setState('listening', '<b class="good-text">● Слушаю</b> — спрашивайте');
+      else if (!speaking && stage.dataset.state === 'speaking') setState('listening', '<b class="ok">● Слушаю</b> — спрашивайте');
     }
     voice.raf = requestAnimationFrame(tick);
   };
@@ -216,7 +217,7 @@ async function startVoice() {
   };
   ws.onmessage = ({ data }) => {
     const m = JSON.parse(data);
-    if (m.t === 'ready') setState('listening', '<b class="good-text">● Слушаю</b> — спрашивайте');
+    if (m.t === 'ready') setState('listening', '<b class="ok">● Слушаю</b> — спрашивайте');
     else if (m.t === 'audio') playPcm(m.d);
     else if (m.t === 'in') liveLine('me', m.text);
     else if (m.t === 'out') liveLine('bot', m.text);
@@ -291,7 +292,7 @@ async function pointTo(el, caption) {
   p.querySelector('.ai-caption').hidden = !caption;
   // аватар — над левой частью элемента, подпись справа от него
   const x = Math.min(window.innerWidth - 320, Math.max(8, r.left + Math.min(r.width * 0.25, 160)));
-  const y = Math.min(window.innerHeight - 70, Math.max(64, r.top - 58));
+  const y = Math.min(window.innerHeight - 70, Math.max(90, r.top - 58));
   p.style.transform = `translate(${x}px, ${y}px)`;
   document.querySelectorAll('.ai-focus').forEach((x) => x.classList.remove('ai-focus'));
   await sleep(500);
@@ -301,31 +302,46 @@ async function pointTo(el, caption) {
 async function run(a) {
   const g = a.args || {};
   const card = (id) => `#/c/${encodeURIComponent(id)}`;
-  const onCard = (id) => decodeURIComponent(location.hash).startsWith(`#/c/${id}`);
+  const onCard = (id) => decodeURIComponent(location.hash.split('?')[0]) === `#/c/${id}`;
+  // экран считается открытым, когда #view помечен его ключом (shell.painted)
+  const onView = (prefix, sel) => sel.split(',').map((x) => `#view[data-key^="${prefix.replace(/["\\]/g, '')}"] ${x.trim()}`).join(', ');
+  const cardKey = (id) => `card:${id}:`;
   if (a.name === 'open_page') {
     const map = { list: '#/', appeals: '#/appeals', checklists: '#/checklists', stats: '#/stats' };
-    await pointTo(await goto(map[g.page] || '#/', '.page-head'), g.caption);
+    const page = map[g.page] ? g.page : 'list';
+    await pointTo(await goto(map[page], onView(page, '.page-anim > .lane, .page-anim > .head')), g.caption);
   } else if (a.name === 'open_conversation') {
-    await pointTo(await goto(card(g.conversation_id), '.score-card, .empty'), g.caption);
+    await pointTo(await goto(card(g.conversation_id), onView(cardKey(g.conversation_id), '.score')), g.caption);
   } else if (a.name === 'point_at_rows') {
+    // строки могли скрыть фильтры списка — сбрасываем их и перерисовываем список
     setListFilters();
+    document.getElementById('view').dataset.key = ''; // ждём новую отрисовку списка, а не старую
     const ids = g.conversation_ids || [];
     if (location.hash !== '#/' && location.hash !== '') location.hash = '#/';
-    await waitFor(ids.length ? `tr[data-id="${CSS.escape(ids[0])}"]` : '.table');
-    const rows = ids.map((id) => document.querySelector(`tr[data-id="${CSS.escape(id)}"]`)).filter(Boolean);
+    else window.dispatchEvent(new HashChangeEvent('hashchange'));
+    await sleep(150);
+    await waitFor(onView('list', ids.length ? `li[data-row-id="${CSS.escape(ids[0])}"]` : '.cards, .rows, .empty'));
+    // карточки догружают ход разговора — ждём, пока высота строк перестанет меняться
+    for (let t = Date.now(); document.querySelector('.fp-wait, .cv-skel') && Date.now() - t < 6000; ) await sleep(150);
+    document.querySelectorAll('.ai-row').forEach((r) => r.classList.remove('ai-row'));
+    const rows = ids.map((id) => document.querySelector(`li[data-row-id="${CSS.escape(id)}"]`)).filter(Boolean);
     rows.forEach((r) => r.classList.add('ai-row'));
-    await pointTo(rows[0], g.caption);
+    await pointTo(rows[0]?.firstElementChild, g.caption);
   } else if (a.name === 'point_at_criterion') {
-    if (!onCard(g.conversation_id)) await goto(card(g.conversation_id), '.criteria');
-    document.querySelector('[data-tab="result"]')?.click();
-    await pointTo(await waitFor(`#crit-${CSS.escape(g.criterion_id)}`), g.caption);
+    if (!onCard(g.conversation_id)) await goto(card(g.conversation_id), onView(cardKey(g.conversation_id), '#breakdown'));
+    const box = await waitFor(`#crit-${CSS.escape(g.criterion_id)}`);
+    // раскрываем критерий: объяснение и реплика-доказательство подсвечиваются в разговоре
+    if (box && !box.classList.contains('on')) {
+      box.querySelector('.cr-h')?.click();
+      await sleep(350);
+    }
+    await pointTo(document.querySelector(`#crit-${CSS.escape(g.criterion_id)}`), g.caption);
   } else if (a.name === 'point_at_message') {
-    if (!onCard(g.conversation_id)) await goto(card(g.conversation_id), '.transcript');
-    const grid = document.querySelector('.card-grid');
-    if (grid && getComputedStyle(grid).display !== 'grid') document.querySelector('[data-tab="transcript"]')?.click();
+    if (!onCard(g.conversation_id)) await goto(card(g.conversation_id), onView(cardKey(g.conversation_id), '.msgs'));
     const m = await waitFor(`#m-${Number(g.index)}`);
-    m?.classList.add('hl');
-    await pointTo(m, g.caption);
+    if (m) jump(Number(g.index));
+    await sleep(250);
+    await pointTo(document.querySelector(`#m-${Number(g.index)}`), g.caption);
   }
 }
 
@@ -348,7 +364,13 @@ function enqueue(action) {
       }
       await run(action);
       await sleep(1600);
-      hideTimer = setTimeout(() => ($('.ai-pointer').hidden = true), 4000);
+      hideTimer = setTimeout(() => {
+        $('.ai-pointer').hidden = true;
+        document.querySelectorAll('.ai-focus').forEach((x) => x.classList.remove('ai-focus'));
+      }, 4000);
     })
     .catch((e) => console.warn('[assistant action]', action.name, e));
 }
+
+// те же действия на экране доступны другим модулям (и для проверки без модели)
+export { enqueue as showOnScreen };
