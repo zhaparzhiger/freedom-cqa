@@ -6,6 +6,7 @@ import { GoogleGenAI, Modality, StartSensitivity } from '@google/genai';
 import { config } from './env.js';
 import { save, now } from './store.js';
 import { findTraining, getAttempt, clientSystemPrompt, coachTips } from './training.js';
+import { handleAssistantLive } from './assistant-live.js';
 
 const LIVE_MODEL = process.env.LIVE_MODEL || 'gemini-live-2.5-flash-native-audio';
 const LIVE_LOCATION = process.env.LIVE_LOCATION || 'europe-west1';
@@ -31,6 +32,12 @@ const clock = (startedAt) => {
 export function attachLive(server) {
   const wss = new WebSocketServer({ noServer: true });
   server.on('upgrade', (req, socket, head) => {
+    // голос ассистента «Аудитор»
+    if (req.url.startsWith('/api/assistant/live')) {
+      const route = new URL(req.url, 'http://x').searchParams.get('route') || '#/';
+      return wss.handleUpgrade(req, socket, head, (ws) => handleAssistantLive(ws, route));
+    }
+    // голосовая тренировка оператора
     const m = req.url.match(/^\/api\/train\/([^/]+)\/live\?attempt=([^&]+)/);
     if (!m) return socket.destroy();
     wss.handleUpgrade(req, socket, head, (ws) => handle(ws, decodeURIComponent(m[1]), decodeURIComponent(m[2])));

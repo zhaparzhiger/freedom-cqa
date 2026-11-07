@@ -65,7 +65,7 @@ function rows() {
 }
 
 // ── инструменты данных ───────────────────────────────────────────────
-const dataTools = {
+export const dataTools = {
   get_overview() {
     const r = rows();
     const totals = r.map((x) => x.total).filter((t) => t != null);
@@ -88,11 +88,24 @@ const dataTools = {
       if (r.gross) o.gross++;
       r.failed.forEach((f) => (o.failed[f] = (o.failed[f] || 0) + 1));
     }
+    // названия критериев вместо голых id — иначе модель угадывает смысл «c02» и ошибается
+    const cl = db().checklists.find((c) => c.id === db().activeChecklistId);
+    const nameOf = (id) => cl?.criteria.find((c) => c.id === id)?.name || id;
     const list = Object.values(by)
       .filter((o) => o.totals.length)
-      .map((o) => ({ operator: o.operator, average: Math.round((o.totals.reduce((s, x) => s + x, 0) / o.totals.length) * 100) / 100, dialogs: o.dialogs, gross_errors: o.gross, typical_failures: o.failed }));
+      .map((o) => ({
+        operator: o.operator,
+        average: Math.round((o.totals.reduce((s, x) => s + x, 0) / o.totals.length) * 100) / 100,
+        dialogs: o.dialogs,
+        gross_errors: o.gross,
+        failed_criteria: Object.entries(o.failed).map(([id, n]) => ({ criterion_id: id, name: nameOf(id), times: n })),
+      }));
     list.sort((a, b) => (order === 'worst' ? a.average - b.average : b.average - a.average) || b.dialogs.length - a.dialogs.length);
-    return { order, operators: list.slice(0, Math.min(20, limit || 5)), note: 'Оператор определяется по имени из первой реплики; у одного имени может быть несколько диалогов.' };
+    return {
+      order,
+      operators: list.slice(0, Math.min(20, limit || 5)),
+      note: 'Оператор определяется по имени из первой реплики. Чтобы объяснить конкретную ошибку, сначала вызови get_conversation и опирайся на explanation критерия.',
+    };
   },
   find_conversations({ language, channel, gross_error, failed_criterion, min_score, max_score, sort = 'score_asc', limit = 10 }) {
     let r = rows();
@@ -138,10 +151,10 @@ const dataTools = {
 };
 
 // ── инструменты интерфейса (выполняет браузер) ──────────────────────
-const UI_TOOLS = new Set(['open_page', 'open_conversation', 'point_at_criterion', 'point_at_message', 'point_at_rows']);
+export const UI_TOOLS = new Set(['open_page', 'open_conversation', 'point_at_criterion', 'point_at_message', 'point_at_rows']);
 
 const S = (properties, required = []) => ({ type: 'OBJECT', properties, required });
-const TOOLS = [
+export const TOOLS = [
   { name: 'get_overview', description: 'Общая сводка: число диалогов, средний балл, грубые ошибки, открытые апелляции, активный чек-лист.', parameters: S({}) },
   {
     name: 'rank_operators',
@@ -183,10 +196,12 @@ const TOOLS = [
   },
 ];
 
-const SYSTEM = `Ты — «Аудитор», ИИ-ассистент руководителя контроля качества на платформе Freedom CQA (оценка диалогов операторов поддержки по чек-листу).
+export const SYSTEM = `Ты — «Аудитор», ИИ-ассистент руководителя контроля качества на платформе Freedom CQA (оценка диалогов операторов поддержки по чек-листу).
+Ты ИИ, а не реальный человек: не называй себя чужим именем и не говори от лица руководителей компании.
 Ты отвечаешь по-русски, кратко и по делу, как опытный руководитель КК: цифры, имена, конкретные ошибки и что с ними делать.
 Правила:
 - Всегда опирайся на данные из инструментов, ничего не выдумывай. Если данных нет — скажи об этом.
+- Прежде чем называть или показывать ошибку конкретного диалога, ОБЯЗАТЕЛЬНО вызови get_conversation и пересказывай explanation нужного критерия. Реплику для point_at_message бери из evidence этого критерия.
 - Когда говоришь о конкретном операторе, диалоге или ошибке — ПОКАЗЫВАЙ это на экране: point_at_rows для списка диалогов, point_at_criterion для ошибки, point_at_message для реплики-доказательства, open_page для раздела. Пользователь видит, как ты ведёшь указатель.
 - Порядок показа: сначала общий вид (строки в списке), затем конкретный диалог и критерий, затем реплика. Не больше 4 действий на экране за ответ.
 - Учитывай все аспекты: средний балл, грубые ошибки, типичные слабые критерии, апелляции, число диалогов (по одному диалогу выводы делай осторожно).
@@ -200,11 +215,14 @@ export async function assistantTurn(history, context) {
   if (context?.route) contents[contents.length - 1].parts.unshift({ text: `(Служебное: сейчас на экране ${context.route})` });
   const actions = [];
   const trace = [];
-  for (let step = 0; step < 6; step++) {
+  for (let step = 0; step < 10; step++) {
+    // последний шаг — без инструментов: модель обязана ответить текстом по уже собранным данным
+    const last = step === 9;
     const { json } = await generateRaw({
       systemInstruction: { role: 'system', parts: [{ text: SYSTEM }] },
       contents,
       tools: [{ functionDeclarations: TOOLS }],
+      ...(last ? { toolConfig: { functionCallingConfig: { mode: 'NONE' } } } : {}),
       generationConfig: { temperature: 0.2 },
     });
     const parts = json.candidates?.[0]?.content?.parts || [];
@@ -218,7 +236,7 @@ export async function assistantTurn(history, context) {
       let response;
       if (UI_TOOLS.has(fc.name)) {
         actions.push({ name: fc.name, args: fc.args || {} });
-        response = { result: 'показано на экране' };
+        response = { result: 'показано на экране. Если всё нужное уже показано — ответь пользователю текстом.' };
       } else if (dataTools[fc.name]) {
         try {
           response = { result: dataTools[fc.name](fc.args || {}) };
