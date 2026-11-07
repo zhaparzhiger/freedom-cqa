@@ -2,6 +2,9 @@
 import { api } from '../api.js';
 import { esc, toast, busy, fmtDate, fmt, fmtUsd } from '../ui.js';
 
+// коды критериев из приложения к гайду «Как сдать результаты»
+const DEFAULT_CODES = { c01: 'contact', c02: 'discovery', c03: 'identification', c04: 'consultation', c05: 'empathy', c06: 'dialogue', c07: 'closure', c08: 'critical' };
+
 let selectedId = null;
 let draft = null; // редактируемая копия выбранного чек-листа
 let dirty = false;
@@ -145,6 +148,8 @@ function criterionEditor(c, i) {
           <input type="number" min="0" step="1" data-f="weight" value="${c.weight}" ${c.type === 'flag' ? 'disabled' : ''}></label>
         <label class="check-field ${c.type === 'flag' ? 'disabled' : ''}"><input type="checkbox" data-f="naAllowed" ${c.naAllowed ? 'checked' : ''} ${c.type === 'flag' ? 'disabled' : ''}> Разрешён N/A</label>
       </div>
+      <label class="field narrow-wide"><span>Код для выгрузки results.json <span class="muted">(contact, discovery, identification, consultation, empathy, dialogue, closure, critical)</span></span>
+        <input data-f="code" value="${esc(c.code || DEFAULT_CODES[c.id] || '')}" placeholder="например, closure"></label>
       ${c.naAllowed && c.type !== 'flag' ? `<label class="field"><span>Когда ставится N/A</span><input data-f="naCondition" value="${esc(c.naCondition)}"></label>` : ''}
       <label class="field"><span>${c.type === 'scale' ? 'Что оценивается' : 'Правило «Да»'}</span><textarea rows="2" data-f="rule">${esc(c.rule)}</textarea></label>
       ${c.type === 'scale' ? `

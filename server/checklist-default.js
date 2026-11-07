@@ -16,6 +16,7 @@ export function defaultChecklist() {
     criteria: [
       {
         id: 'c01',
+        code: 'contact',
         section: 's1',
         name: 'Установление контакта',
         type: 'yesno',
@@ -28,6 +29,7 @@ export function defaultChecklist() {
       },
       {
         id: 'c02',
+        code: 'discovery',
         section: 's1',
         name: 'Выявление потребности',
         type: 'yesno',
@@ -40,6 +42,7 @@ export function defaultChecklist() {
       },
       {
         id: 'c03',
+        code: 'identification',
         section: 's2',
         name: 'Идентификация',
         type: 'yesno',
@@ -52,6 +55,7 @@ export function defaultChecklist() {
       },
       {
         id: 'c04',
+        code: 'consultation',
         section: 's2',
         name: 'Корректная и полная консультация',
         type: 'scale',
@@ -70,6 +74,7 @@ export function defaultChecklist() {
       },
       {
         id: 'c05',
+        code: 'empathy',
         section: 's3',
         name: 'Эмпатия и клиентоориентированность',
         type: 'yesno',
@@ -82,6 +87,7 @@ export function defaultChecklist() {
       },
       {
         id: 'c06',
+        code: 'dialogue',
         section: 's3',
         name: 'Управление диалогом, скорость и грамотность',
         type: 'scale',
@@ -99,6 +105,7 @@ export function defaultChecklist() {
       },
       {
         id: 'c07',
+        code: 'closure',
         section: 's3',
         name: 'Завершение',
         type: 'yesno',
@@ -111,6 +118,7 @@ export function defaultChecklist() {
       },
       {
         id: 'c08',
+        code: 'critical',
         section: 's4',
         name: 'Грубые ошибки',
         type: 'flag',

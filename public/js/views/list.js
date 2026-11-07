@@ -54,6 +54,7 @@ export async function renderList(ctx) {
         <p class="muted">${convs.length} диалогов · оценено ${evaluated.length}${avg != null ? ` · средний балл ${fmt(avg)}` : ''}</p>
       </div>
       <div class="head-actions">
+        <a class="btn" href="${api.resultsUrl(filters.group)}" download="results.json" title="Формат JSON 1.0 из приложения к гайду">results.json для сдачи</a>
         <a class="btn ghost" href="${api.exportUrl('csv')}" download>Экспорт CSV</a>
         <a class="btn ghost" href="${api.exportUrl('json')}" download>Экспорт JSON</a>
       </div>

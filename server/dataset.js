@@ -1,10 +1,14 @@
 // Загрузка наборов из временного API организаторов и проверка формата записей.
 import { config } from './env.js';
 
-export async function fetchGroup(groupId) {
-  if (!config.orgApiUrl) throw new Error('Не задан ORG_API_URL в .env');
-  const url = new URL(config.orgApiUrl);
-  url.searchParams.set('group_id', groupId);
+export async function fetchGroup(groupId, directUrl) {
+  let url;
+  if (directUrl) url = new URL(directUrl); // полная ссылка, если организаторы выдадут контрольный набор по отдельному адресу
+  else {
+    if (!config.orgApiUrl) throw new Error('Не задан ORG_API_URL в .env');
+    url = new URL(config.orgApiUrl);
+    url.searchParams.set('group_id', groupId);
+  }
   const res = await fetch(url, { signal: AbortSignal.timeout(90_000) });
   const text = await res.text();
   let json;

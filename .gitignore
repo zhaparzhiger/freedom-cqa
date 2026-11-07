@@ -5,3 +5,4 @@ data/db.json.tmp
 data/raw/
 *.local.*
 .DS_Store
+presentation/

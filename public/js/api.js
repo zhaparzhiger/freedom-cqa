@@ -44,4 +44,5 @@ export const api = {
   applyImpact: (id, draft, jobId) => request('POST', `/api/checklists/${id}/apply-impact`, { draft, jobId }),
   audioUrl: (id) => `${base()}/api/audio/${encodeURIComponent(id)}`,
   exportUrl: (format) => `${base()}/api/export?format=${format}`,
+  resultsUrl: (group) => `${base()}/api/results?download=1${group ? `&group=${encodeURIComponent(group)}` : ''}`,
 };

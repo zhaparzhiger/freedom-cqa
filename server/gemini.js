@@ -42,13 +42,16 @@ async function vertexToken() {
 }
 
 export function backendName() {
-  if (config.credentialsFile) return `Vertex AI (${config.vertexLocation})`;
+  if (config.credentialsFile && !(vertexDisabled && config.apiKey)) return `Vertex AI (${config.vertexLocation})`;
   if (config.apiKey) return 'Google AI Studio';
   return 'не настроен';
 }
 
+// Если у проекта Vertex отключён биллинг (403), а в .env есть ключ AI Studio — дальше работаем через него.
+let vertexDisabled = false;
+
 async function endpoint(model) {
-  if (config.credentialsFile) {
+  if (config.credentialsFile && !(vertexDisabled && config.apiKey)) {
     const { token, project } = await vertexToken();
     const loc = config.vertexLocation;
     const host = loc === 'global' ? 'aiplatform.googleapis.com' : `${loc}-aiplatform.googleapis.com`;
@@ -163,6 +166,11 @@ async function postModel(body, model) {
     }
     const errText = await res.text();
     lastError = new Error(`Gemini ${res.status}: ${errText.slice(0, 400)}`);
+    if (res.status === 403 && /billing/i.test(errText) && config.credentialsFile && config.apiKey && !vertexDisabled) {
+      vertexDisabled = true;
+      console.warn('[gemini] у проекта Vertex отключён биллинг — переключаюсь на ключ Google AI Studio (GEMINI_API_KEY)');
+      continue;
+    }
     if (![0, 429, 500, 502, 503, 504].includes(res.status)) break;
     pick++;
     // все модели пула уже пробовали — пауза перед следующим кругом

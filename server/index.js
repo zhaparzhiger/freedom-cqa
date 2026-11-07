@@ -16,6 +16,7 @@ import { startImpact, getImpactJob, publicImpact, fingerprint, evaluateSmart } f
 import { learningCurve } from './precedents.js';
 import { startParity, parityState } from './parity.js';
 import { assistantTurn } from './assistant.js';
+import { buildResults, validateResults } from './submission.js';
 import { criterionAgent, formatMap } from './pipeline.js';
 import { formatTranscript } from './prompt.js';
 
@@ -100,6 +101,7 @@ function upsertConversations(records, group) {
   let added = 0;
   let updated = 0;
   const errors = [];
+  const ids = [];
   for (const r of records) {
     const errs = validateRecord(r);
     if (errs.length) {
@@ -117,9 +119,10 @@ function upsertConversations(records, group) {
       importedAt: now(),
     };
     exists ? updated++ : added++;
+    ids.push(String(r.conversation_id));
   }
   save();
-  return { added, updated, errors, total: records.length };
+  return { added, updated, errors, total: records.length, ids };
 }
 
 // ── пакетная оценка ─────────────────────────────────────────────────
@@ -164,6 +167,7 @@ function startJob({ ids, checklist, votes, mode, smart = false }) {
       } catch (e) {
         job.failed++;
         job.errors.push({ conversation_id: id, error: e.message });
+        conv.lastError = e.message;
       } finally {
         job.running = job.running.filter((x) => x !== id);
       }
@@ -339,9 +343,11 @@ route('GET', '/api/evaluations/:id/raw', ({ params }) => {
 
 route('POST', '/api/import', async ({ body }) => {
   const groupId = String(body.groupId || '').trim();
-  if (!groupId) throw bad('Укажите group_id');
-  const data = await fetchGroup(groupId);
-  return { group: data.dataset_group_id || groupId, ...upsertConversations(data.records || [], data.dataset_group_id || groupId) };
+  const url = String(body.url || '').trim();
+  if (!groupId && !url) throw bad('Укажите group_id или ссылку');
+  const data = await fetchGroup(groupId, url || undefined);
+  const group = String(body.group || data.dataset_group_id || groupId || 'PROD');
+  return { group, ...upsertConversations(data.records || [], group) };
 });
 
 route('POST', '/api/upload', ({ body }) => {
@@ -627,6 +633,18 @@ route('POST', '/api/train/:token/attempts/:aid/finish', async ({ params }) => {
 });
 
 route('GET', '/api/stats', () => stats());
+
+// результаты для сдачи организаторам (формат JSON 1.0 из приложения к гайду)
+route('GET', '/api/results', ({ query, res }) => {
+  const doc = buildResults({ group: query.get('group') || '' });
+  const problems = validateResults(doc);
+  if (query.get('download')) {
+    res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'content-disposition': 'attachment; filename="results.json"' });
+    res.end(JSON.stringify(doc, null, 2));
+    return undefined;
+  }
+  return { problems, count: doc.results.length, errors: doc.results.filter((r) => r.status === 'error').length, doc };
+});
 
 route('GET', '/api/export', ({ query, res }) => {
   const rows = exportRows(query.get('group') || '');
