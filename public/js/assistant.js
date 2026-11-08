@@ -222,8 +222,8 @@ async function ask(q) {
     }
     history.push({ role: 'assistant', text: data.reply });
     const acts = data.actions || [];
-    if (acts.length >= 2) {
-      // несколько мест в одном ответе — показываем их по очереди, и каждая фраза звучит, пока подсвечено её место
+    if (acts.length) {
+      // ответ с показом: места по очереди, каждая фраза — у аватара рядом со своим местом (окно свёрнуто)
       const ss = sentences(data.reply);
       const steps = acts.map((a, i) => ({ action: a, text: i === acts.length - 1 ? ss.slice(i).join(' ') : ss[i] || '' }));
       await perform('tour', { steps });
@@ -405,13 +405,9 @@ function caption(html) {
 }
 
 // Режим показа: окно свёрнуто, аватар ходит по странице и подсвечивает то, о чём говорит; его фразы — подписью у аватара.
-// Окно сворачивается, только когда это нужно:
-//  · экскурсия (tour) — несколько мест подряд;
-//  · голосом показывают второе место подряд;
-//  · подсвечиваемое место закрыто окном;
-//  · узкий экран, где окно закрывает интерфейс.
-// Ответ без показа и одна подсветка, которую окно не закрывает, — окно остаётся открытым.
-// Когда речь и действия закончились: указатель исчезает, свёрнутое окно возвращается.
+// Окно сворачивается на любой показ (подсветка, экскурсия, действие на сайте). Ответ словами — окно остаётся открытым:
+// решает модель, показывать или нет (правила в server/assistant.js).
+// Когда речь и действия закончились: указатель исчезает, окно возвращается.
 let jobs = 0;
 const hidePointer = () => {
   $('.ai-pointer').hidden = true;
@@ -455,8 +451,6 @@ const present = {
   },
 };
 
-const overlaps = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top;
-
 async function pointTo(el, text) {
   if (!el) return;
   const top0 = el.getBoundingClientRect();
@@ -475,8 +469,6 @@ async function pointTo(el, text) {
     }
   }
   const r = el.getBoundingClientRect();
-  // место закрыто окном ассистента — сворачиваем окно, иначе пользователь не увидит, о чём речь
-  if (!present.on && !panel.hidden && overlaps(r, panel.getBoundingClientRect())) present.start();
   const p = $('.ai-pointer');
   p.hidden = false;
   // своя подпись действия; без неё остаётся текущая фраза Аудитора
@@ -543,8 +535,7 @@ let chain = Promise.resolve();
 const recent = new Map(); // ключ действия → время: голосовая модель иногда повторяет ту же подсветку
 
 // любое действие на экране идёт в общую очередь. kind: 'hidden' — ничего не показывает (снимок экрана),
-// 'show' — одно место (окно остаётся, если не мешает), 'tour' — несколько мест подряд (окно сворачивается)
-let lastShownAt = 0;
+// 'show' / 'tour' — Аудитор что-то подсвечивает: окно чата сворачивается, чтобы не закрывать страницу
 function schedule(fn, kind = 'show') {
   jobs++;
   const job = chain.then(async () => {
@@ -552,13 +543,11 @@ function schedule(fn, kind = 'show') {
       clearTimeout(present.timer);
       // голос: сначала договариваем уже сказанное, потом переводим указатель — слова и подсветка совпадают
       if (voice.ws) await audioDrained();
-      const series = voice.ws && Date.now() - lastShownAt < 20000; // голосом показывают места одно за другим
-      if (kind === 'tour' || series || window.innerWidth < 720) present.start();
+      present.start();
     }
     try {
       return await fn();
     } finally {
-      if (kind !== 'hidden') lastShownAt = Date.now();
       jobs--;
       present.idle();
     }
